@@ -284,15 +284,16 @@ tbody tr:hover td:first-child{background:#fafcff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 16px 12px;display:flex;flex-direction:column}
 .card .ctop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.card .ctop>div:first-child{min-width:0}
 .card h3{margin:0;font-size:16px;line-height:1.35}
 .card .code{font-size:12px;color:var(--sub);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .vsel{font-family:inherit;font-size:12px;font-weight:700;color:var(--brand);background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:3px 22px 3px 8px;cursor:pointer;
   appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23003580' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 7px center}
 .vsel:hover{border-color:var(--brand2)}
 .vsel-sm{font-size:11.5px;padding:1px 20px 1px 7px;background-position:right 6px center;font-weight:600}
-.card .navnow{text-align:right}
+.card .navnow{text-align:right;flex-shrink:0}
 .card .navnow .v{font-size:22px;font-weight:800;line-height:1}
-.card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px}
+.card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px;white-space:nowrap}
 .card .navnow .chg{font-size:12.5px;font-weight:700;margin-top:3px}
 .retrow{display:flex;gap:6px;margin:12px 0 6px;flex-wrap:wrap}
 .ret{flex:1;min-width:52px;background:#f7f9fd;border:1px solid var(--line);border-radius:9px;padding:7px 6px;text-align:center}
