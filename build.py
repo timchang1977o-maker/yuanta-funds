@@ -166,35 +166,54 @@ def _r(x):
     return round(x, 2) if isinstance(x, (int, float)) else None
 
 # ---------- 抓全部 ----------
+# 每個 group 一張卡；variants 多於 1 個時卡片右上出現幣別/級別下拉
+GROUPS = [
+    {'name': '主動元大AI新經濟', 'kind': 'etf',
+     'note': '主動式 ETF（2025/12 上市，未滿 1 年故 1年/3年無值）',
+     'variants': [{'code': '00990A', 'label': '新台幣'}]},
+    {'name': '元大臺灣ESG永續ETF連結基金', 'kind': 'fund',
+     'note': '元大臺灣ESG永續ETF（00850）的連結基金；2024/01 成立，B配息／A不配息，未滿 3 年故近3年無值',
+     'variants': [
+         {'code': 'A05192', 'label': '新台幣B（配息）'},
+         {'code': 'A05191', 'label': '新台幣A（不配息）'}]},
+    {'name': '元元致富·財富雙享', 'kind': 'disc',
+     'note': '元大人壽全委帳戶（新台幣，2025/08 成立，月撥回；報酬含撥回）',
+     'variants': [{'code': 'MDTWD0002', 'label': '新台幣'}]},
+    {'name': '元元致富·財富雙利', 'kind': 'disc',
+     'note': '元大人壽全委帳戶（美元，2026/04 成立，月撥回；報酬含撥回）',
+     'variants': [{'code': 'MDUSD0001', 'label': '美元'}]},
+    {'name': '元大優質收益成長多重資產', 'kind': 'fund',
+     'note': '多重資產型共同基金（2026/07/16 成立）；含新台幣／美元／日圓級別（皆 A 類型累積），未滿各期間故報酬「—」，走勢為成立以來每日淨值',
+     'variants': [
+         {'code': 'A05219', 'label': '新台幣'},
+         {'code': 'A05225', 'label': '美元'},
+         {'code': 'A05231', 'label': '日圓'}]},
+]
+
 def build_data():
-    funds = []
-    plan = [
-        ('etf', '00990A', '主動元大AI新經濟', '主動式 ETF（2025/12 上市，未滿 1 年故 1年/3年無值）'),
-        ('etf', '00850', '元大臺灣ESG永續', '被動式 ETF；追蹤臺灣永續指數（2019 上市）'),
-        ('disc', 'MDTWD0002', '元元致富·財富雙享', '元大人壽全委帳戶（新台幣，2025/08 成立，月撥回；報酬含撥回）'),
-        ('disc', 'MDUSD0001', '元元致富·財富雙利', '元大人壽全委帳戶（美元，2026/04 成立，月撥回；報酬含撥回）'),
-        ('fund', 'A05219', '元大優質收益成長多重資產-新台幣', '多重資產型共同基金（新台幣A類型累積，2026/07/16 成立）；未滿各期間故報酬顯示「—」，走勢為成立以來每日淨值'),
-    ]
-    for kind, code, zh, note in plan:
-        try:
-            if kind == 'etf':
-                f = fetch_etf(code, zh, note)
-            elif kind == 'fund':
-                f = fetch_fund(code, zh, note)
-            else:
-                f = fetch_carteblanche(code, zh, note)
-            funds.append(f)
-            print(f'[OK] {zh}: nav={f["nav"]} ({f["navDate"]}) YTD={f["returns"].get("ytd")}')
-            time.sleep(1.2)
-        except Exception as e:
-            print(f'[FAIL] {zh} ({code}): {e}', file=sys.stderr)
-    return funds
+    fetch = {'etf': fetch_etf, 'fund': fetch_fund, 'disc': fetch_carteblanche}
+    groups = []
+    for g in GROUPS:
+        variants = []
+        for v in g['variants']:
+            try:
+                r = fetch[g['kind']](v['code'], g['name'], g['note'])
+                r['label'] = v['label']
+                variants.append(r)
+                print(f'[OK] {g["name"]} / {v["label"]}: nav={r["nav"]} ({r["navDate"]}) YTD={r["returns"].get("ytd")}')
+                time.sleep(1.0)
+            except Exception as e:
+                print(f'[FAIL] {g["name"]} / {v["label"]} ({v["code"]}): {e}', file=sys.stderr)
+        if variants:
+            groups.append({'name': g['name'], 'kind': g['kind'], 'note': g['note'],
+                           'source': variants[0]['source'], 'variants': variants})
+    return groups
 
 def main():
-    funds = build_data()
+    groups = build_data()
     payload = {
         'updated': datetime.datetime.now(TPE).strftime('%Y-%m-%d %H:%M'),
-        'funds': funds,
+        'groups': groups,
     }
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, 'data.json'), 'w', encoding='utf-8') as fp:
@@ -266,7 +285,10 @@ tbody tr:hover td:first-child{background:#fafcff}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 16px 12px;display:flex;flex-direction:column}
 .card .ctop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .card h3{margin:0;font-size:16px;line-height:1.35}
-.card .code{font-size:12px;color:var(--sub);margin-top:2px}
+.card .code{font-size:12px;color:var(--sub);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.vsel{font-family:inherit;font-size:12px;font-weight:700;color:var(--brand);background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:3px 22px 3px 8px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23003580' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 7px center}
+.vsel:hover{border-color:var(--brand2)}
 .card .navnow{text-align:right}
 .card .navnow .v{font-size:22px;font-weight:800;line-height:1}
 .card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px}
@@ -292,9 +314,11 @@ footer b{color:var(--ink)}
     <div class="meta">資料更新：<b>$UPDATED</b>（台北）</div>
   </header>
   <div class="legend">
-    <span class="tag"><b>ETF</b> 市價 · 不含息報酬（FinMind/TWSE）</span>
-    <span class="tag"><b>全委帳戶</b> 淨值 · 報酬含撥回（元大人壽官方）</span>
+    <span class="tag"><b>ETF</b> 市價 · 不含息報酬（FinMind）</span>
+    <span class="tag"><b>共同基金</b> 淨值 · 官方各期報酬（鉅亨/晨星）</span>
+    <span class="tag"><b>全委帳戶</b> 淨值 · 含撥回（元大人壽官方）</span>
     <span class="tag">紅漲綠跌（台股慣例）</span>
+    <span class="tag">多幣別/級別可用卡片右上下拉切換 ⤵</span>
   </div>
 
   <div class="tablecard">
@@ -314,8 +338,8 @@ footer b{color:var(--ink)}
   <div class="grid" id="cards"></div>
 
   <footer>
-    <b>資料來源</b>：ETF＝FinMind／TWSE 日線（市價收盤，報酬為<b>不含息</b>之市價報酬；00850 有配息，含息總報酬略高於此）；共同基金＝鉅亨 fund.api（晨星官方各期報酬）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
-    <b>說明</b>：全委帳戶（元元致富·財富雙利/雙享）為投資型保單之類全權委託帳戶，走勢圖為「含撥回報酬指數（基準 100）」而非單位淨值曲線；「近1年/近3年」在成立未滿期間顯示「—」。本頁僅供參考，非投資建議；實際淨值以各機構公告為準。
+    <b>資料來源</b>：ETF（00990A）＝FinMind／TWSE 日線（市價收盤、<b>不含息</b>之市價報酬）；共同基金＝鉅亨 fund.api（晨星官方各期報酬）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
+    <b>說明</b>：有多幣別／配息級別的標的，於卡片右上下拉切換（總覽表顯示預設級別）。全委帳戶（元元致富·財富雙利/雙享）為投資型保單之類全權委託帳戶，走勢圖為「含撥回報酬指數（基準 100）」而非單位淨值曲線；「近1年/近3年」在成立未滿期間顯示「—」。本頁僅供參考，非投資建議；實際淨值以各機構公告為準。
   </footer>
 </div>
 
@@ -324,18 +348,20 @@ const DATA = $DATA;
 const fmtPct = v => (v===null||v===undefined) ? '<span class="na">—</span>' :
   '<span class="'+(v>=0?'pos':'neg')+'">'+(v>=0?'+':'')+v.toFixed(2)+'%</span>';
 const kmap = {etf:['ETF','k-etf'],fund:['基金','k-fund'],disc:['全委','k-disc']};
+const fnav = v => (v.nav!==null&&v.nav!==undefined)?v.nav:'—';
 
 function overview(){
   const tb = document.querySelector('#ovt tbody');
-  DATA.funds.forEach(f=>{
-    const r=f.returns||{};
-    const chg = (f.changePct===null||f.changePct===undefined)?'<span class="na">—</span>':fmtPct(f.changePct);
-    const k=kmap[f.kind];
+  DATA.groups.forEach(g=>{
+    const v=g.variants[0], r=v.returns||{};
+    const chg = (v.changePct===null||v.changePct===undefined)?'<span class="na">—</span>':fmtPct(v.changePct);
+    const k=kmap[g.kind];
+    const multi = g.variants.length>1 ? ` <span style="color:var(--sub)">· 含 ${g.variants.length} 級別</span>` : '';
     tb.insertAdjacentHTML('beforeend',
       `<tr>
-        <td><span class="nm">${f.name}<span class="kchip ${k[1]}">${k[0]}</span></span><small>${f.code}</small></td>
-        <td>${f.currency||''}</td>
-        <td><span class="navbig">${f.nav!==null&&f.nav!==undefined?f.nav:'—'}</span> <small style="color:var(--sub)">${f.navLabel}</small><br><small style="color:var(--sub)">${f.navDate||''}</small></td>
+        <td><span class="nm">${g.name}<span class="kchip ${k[1]}">${k[0]}</span></span><small>${v.code}${multi}</small></td>
+        <td>${v.currency||''}</td>
+        <td><span class="navbig">${fnav(v)}</span> <small style="color:var(--sub)">${v.navLabel}</small><br><small style="color:var(--sub)">${v.navDate||''}</small></td>
         <td>${chg}</td>
         <td>${fmtPct(r.ytd)}</td><td>${fmtPct(r.m1)}</td><td>${fmtPct(r.m3)}</td>
         <td>${fmtPct(r.y1)}</td><td>${fmtPct(r.y3)}</td>
@@ -431,27 +457,34 @@ function hoverChart(e){
 }
 function hideTip(e){const svg=e.currentTarget;svg.querySelector('.hcz').setAttribute('opacity','0');svg.parentNode.querySelector('.tip').style.opacity='0';}
 
+function cardHTML(g, gi, idx){
+  const v=g.variants[idx], r=v.returns||{}, k=kmap[g.kind];
+  const sel = g.variants.length>1
+    ? `<select class="vsel" aria-label="切換幣別/級別" onchange="switchVar(${gi}, this.selectedIndex)">`+
+      g.variants.map((x,i)=>`<option ${i===idx?'selected':''}>${x.label}</option>`).join('')+`</select>`
+    : `<span>${v.currency||v.label||''}</span>`;
+  const chgtxt=(v.change!==null&&v.change!==undefined?((v.change>=0?'+':'')+v.change+' '):'')+
+    ((v.changePct===null||v.changePct===undefined)?'':((v.changePct>=0?'+':'')+v.changePct+'%'));
+  const chgcls=(v.changePct>=0)?'pos':'neg';
+  const rets=[['YTD',r.ytd],['近1月',r.m1],['近3月',r.m3],['近1年',r.y1],['近3年',r.y3]];
+  const retHtml=rets.map(x=>`<div class="ret"><div class="l">${x[0]}</div><div class="n ${x[1]===null||x[1]===undefined?'na':(x[1]>=0?'pos':'neg')}">${x[1]===null||x[1]===undefined?'—':((x[1]>=0?'+':'')+x[1].toFixed(2)+'%')}</div></div>`).join('');
+  return `<div class="ctop">
+      <div><h3>${g.name}<span class="kchip ${k[1]}">${k[0]}</span></h3>
+        <div class="code">${v.code} · ${sel}</div></div>
+      <div class="navnow"><div class="v">${fnav(v)}</div><div class="d">${v.navLabel} · ${v.navDate||''}</div>${chgtxt?`<div class="chg ${chgcls}">${chgtxt}</div>`:''}</div>
+    </div>
+    <div class="retrow">${retHtml}</div>
+    <div style="font-size:11.5px;color:var(--sub);margin:2px 2px 4px">${v.seriesLabel}</div>
+    ${lineChart(v)}
+    <div class="cnote">${g.note||''}</div>`;
+}
+function switchVar(gi, idx){
+  document.getElementById('card'+gi).innerHTML = cardHTML(DATA.groups[gi], gi, idx);
+}
 function cards(){
   const box=document.getElementById('cards');
-  DATA.funds.forEach(f=>{
-    const r=f.returns||{};
-    const chgtxt=(f.change!==null&&f.change!==undefined?((f.change>=0?'+':'')+f.change+' '):'')+
-      ((f.changePct===null||f.changePct===undefined)?'':((f.changePct>=0?'+':'')+f.changePct+'%'));
-    const chgcls=(f.changePct>=0)?'pos':'neg';
-    const rets=[['YTD',r.ytd],['近1月',r.m1],['近3月',r.m3],['近1年',r.y1],['近3年',r.y3]];
-    const retHtml=rets.map(x=>`<div class="ret"><div class="l">${x[0]}</div><div class="n ${x[1]===null||x[1]===undefined?'na':(x[1]>=0?'pos':'neg')}">${x[1]===null||x[1]===undefined?'—':((x[1]>=0?'+':'')+x[1].toFixed(2)+'%')}</div></div>`).join('');
-    const k=kmap[f.kind];
-    box.insertAdjacentHTML('beforeend',
-      `<div class="card">
-        <div class="ctop">
-          <div><h3>${f.name}<span class="kchip ${k[1]}">${k[0]}</span></h3><div class="code">${f.code} · ${f.currency||''}</div></div>
-          <div class="navnow"><div class="v">${f.nav!==null&&f.nav!==undefined?f.nav:'—'}</div><div class="d">${f.navLabel} · ${f.navDate||''}</div>${chgtxt?`<div class="chg ${chgcls}">${chgtxt}</div>`:''}</div>
-        </div>
-        <div class="retrow">${retHtml}</div>
-        <div style="font-size:11.5px;color:var(--sub);margin:2px 2px 4px">${f.seriesLabel}</div>
-        ${lineChart(f)}
-        <div class="cnote">${f.note||''}</div>
-      </div>`);
+  DATA.groups.forEach((g,gi)=>{
+    box.insertAdjacentHTML('beforeend', `<div class="card" id="card${gi}">${cardHTML(g,gi,0)}</div>`);
   });
 }
 overview();cards();
