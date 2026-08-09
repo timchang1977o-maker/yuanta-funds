@@ -289,6 +289,7 @@ tbody tr:hover td:first-child{background:#fafcff}
 .vsel{font-family:inherit;font-size:12px;font-weight:700;color:var(--brand);background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:3px 22px 3px 8px;cursor:pointer;
   appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23003580' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 7px center}
 .vsel:hover{border-color:var(--brand2)}
+.vsel-sm{font-size:11.5px;padding:1px 20px 1px 7px;background-position:right 6px center;font-weight:600}
 .card .navnow{text-align:right}
 .card .navnow .v{font-size:22px;font-weight:800;line-height:1}
 .card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px}
@@ -350,22 +351,28 @@ const fmtPct = v => (v===null||v===undefined) ? '<span class="na">—</span>' :
 const kmap = {etf:['ETF','k-etf'],fund:['基金','k-fund'],disc:['全委','k-disc']};
 const fnav = v => (v.nav!==null&&v.nav!==undefined)?v.nav:'—';
 
-function overview(){
-  const tb = document.querySelector('#ovt tbody');
-  DATA.groups.forEach(g=>{
-    const v=g.variants[0], r=v.returns||{};
-    const chg = (v.changePct===null||v.changePct===undefined)?'<span class="na">—</span>':fmtPct(v.changePct);
-    const k=kmap[g.kind];
-    const multi = g.variants.length>1 ? ` <span style="color:var(--sub)">· 含 ${g.variants.length} 級別</span>` : '';
-    tb.insertAdjacentHTML('beforeend',
-      `<tr>
-        <td><span class="nm">${g.name}<span class="kchip ${k[1]}">${k[0]}</span></span><small>${v.code}${multi}</small></td>
+function rowCells(g, gi, idx){
+  const v=g.variants[idx], r=v.returns||{};
+  const chg = (v.changePct===null||v.changePct===undefined)?'<span class="na">—</span>':fmtPct(v.changePct);
+  const k=kmap[g.kind];
+  const sel = g.variants.length>1
+    ? ` · <select class="vsel vsel-sm" aria-label="切換幣別/級別" onchange="switchRow(${gi}, this.selectedIndex)">`+
+      g.variants.map((x,i)=>`<option ${i===idx?'selected':''}>${x.label}</option>`).join('')+`</select>`
+    : '';
+  return `<td><span class="nm">${g.name}<span class="kchip ${k[1]}">${k[0]}</span></span><small>${v.code}${sel}</small></td>
         <td>${v.currency||''}</td>
         <td><span class="navbig">${fnav(v)}</span> <small style="color:var(--sub)">${v.navLabel}</small><br><small style="color:var(--sub)">${v.navDate||''}</small></td>
         <td>${chg}</td>
         <td>${fmtPct(r.ytd)}</td><td>${fmtPct(r.m1)}</td><td>${fmtPct(r.m3)}</td>
-        <td>${fmtPct(r.y1)}</td><td>${fmtPct(r.y3)}</td>
-      </tr>`);
+        <td>${fmtPct(r.y1)}</td><td>${fmtPct(r.y3)}</td>`;
+}
+function switchRow(gi, idx){
+  document.getElementById('row'+gi).innerHTML = rowCells(DATA.groups[gi], gi, idx);
+}
+function overview(){
+  const tb = document.querySelector('#ovt tbody');
+  DATA.groups.forEach((g,gi)=>{
+    tb.insertAdjacentHTML('beforeend', `<tr id="row${gi}">${rowCells(g,gi,0)}</tr>`);
   });
 }
 
