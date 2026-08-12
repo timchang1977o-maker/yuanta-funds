@@ -318,14 +318,45 @@ tbody tr:hover td:first-child{background:#fafcff}
 footer{margin-top:34px;font-size:12px;color:var(--sub);line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
 footer b{color:var(--ink)}
 @media(max-width:560px){.wrap{padding:18px 12px 40px}h1{font-size:21px}.card .navnow .v{font-size:19px}}
+/* 檢視切換（完整版 / 手機好讀版） */
+.hdright{display:flex;flex-direction:column;align-items:flex-end;gap:9px}
+.viewtoggle{display:inline-flex;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:3px}
+.viewtoggle button{font-family:inherit;font-size:12.5px;font-weight:700;color:var(--sub);background:none;border:none;border-radius:999px;padding:6px 13px;cursor:pointer;transition:background .12s,color .12s}
+.viewtoggle button.on{background:var(--brand);color:#fff}
+/* 手機好讀版：一檔一列、大字淨值，適合每日截圖 */
+#mobileview{display:none;max-width:520px;margin:0 auto}
+body.mob #deskview{display:none}
+body.mob #mobileview{display:block}
+body.mob .legend{display:none}
+body.mob footer{display:none}
+.mnote{font-size:11.5px;color:var(--sub);text-align:center;line-height:1.6;margin:16px 4px 0}
+.mrow{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px 15px;margin-bottom:11px}
+.mrow .mtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.mrow .mname{font-size:16px;font-weight:800;line-height:1.32}
+.mrow .msub{font-size:12px;color:var(--sub);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.mrow .mnav{text-align:right;flex-shrink:0}
+.mrow .mnav .v{font-size:27px;font-weight:800;line-height:1}
+.mrow .mnav .u{font-size:11px;color:var(--sub);margin-top:3px;white-space:nowrap}
+.mrow .mnav .c{font-size:13px;font-weight:800;margin-top:4px}
+.mrets{display:flex;gap:4px;margin-top:11px}
+.mrets .mr{flex:1;min-width:0;text-align:center;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:5px 2px}
+.mrets .mr .l{font-size:9.5px;color:var(--sub)}
+.mrets .mr .n{font-size:12.5px;font-weight:800;margin-top:2px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
     <h1>元大基金淨值與表現<span class="badge">Yuanta</span></h1>
-    <div class="meta">資料更新：<b>$UPDATED</b>（台北）</div>
+    <div class="hdright">
+      <div class="meta">資料更新：<b>$UPDATED</b>（台北）</div>
+      <div class="viewtoggle">
+        <button id="btnDesk" onclick="setView(false,true)">🖥 完整版</button>
+        <button id="btnMob" onclick="setView(true,true)">📱 手機好讀版</button>
+      </div>
+    </div>
   </header>
+  <div id="deskview">
   <div class="legend">
     <span class="tag"><b>ETF</b> 市價 · 不含息報酬（FinMind）</span>
     <span class="tag"><b>共同基金</b> 淨值 · 官方各期報酬（鉅亨/晨星）</span>
@@ -349,6 +380,9 @@ footer b{color:var(--ink)}
   </div>
 
   <div class="grid" id="cards"></div>
+  </div><!-- /deskview -->
+
+  <div id="mobileview"></div>
 
   <footer>
     <b>資料來源</b>：ETF（00990A）＝FinMind／TWSE 日線（市價收盤、<b>不含息</b>之市價報酬）；共同基金＝鉅亨 fund.api（晨星官方各期報酬）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
@@ -506,7 +540,52 @@ function cards(){
     box.insertAdjacentHTML('beforeend', `<div class="card" id="card${gi}">${cardHTML(g,gi,0)}</div>`);
   });
 }
-overview();cards();
+/* ---- 手機好讀版：一檔一列，大字最新淨值，適合每日截圖追蹤 ---- */
+function mobileHTML(g, gi, idx){
+  const v=g.variants[idx], r=v.returns||{}, k=kmap[g.kind];
+  const sel = g.variants.length>1
+    ? `<select class="vsel vsel-sm" aria-label="切換幣別/級別" onchange="switchMob(${gi}, this.selectedIndex)">`+
+      g.variants.map((x,i)=>`<option ${i===idx?'selected':''}>${x.label}</option>`).join('')+`</select>`
+    : `<span>${v.currency||v.label||''}</span>`;
+  const chgtxt=(v.change!==null&&v.change!==undefined?((v.change>=0?'+':'')+v.change+' '):'')+
+    ((v.changePct===null||v.changePct===undefined)?'':((v.changePct>=0?'+':'')+v.changePct+'%'));
+  const chgcls=(v.changePct>=0)?'pos':'neg';
+  const rets=[['YTD',r.ytd],['1月',r.m1],['3月',r.m3],['1年',r.y1],['3年',r.y3]];
+  const retHtml=rets.map(x=>`<div class="mr"><div class="l">${x[0]}</div><div class="n ${x[1]===null||x[1]===undefined?'na':(x[1]>=0?'pos':'neg')}">${x[1]===null||x[1]===undefined?'—':((x[1]>=0?'+':'')+x[1].toFixed(1)+'%')}</div></div>`).join('');
+  return `<div class="mtop">
+      <div style="min-width:0"><div class="mname"><span class="kchip ${k[1]}">${k[0]}</span> ${g.name}</div>
+        <div class="msub">${v.code} · ${sel} · ${v.navDate||''}</div></div>
+      <div class="mnav"><div class="v">${fnav(v)}</div><div class="u">${v.navLabel}</div>${chgtxt?`<div class="c ${chgcls}">${chgtxt}</div>`:''}</div>
+    </div>
+    <div class="mrets">${retHtml}</div>`;
+}
+function switchMob(gi, idx){
+  document.getElementById('mrow'+gi).innerHTML = mobileHTML(DATA.groups[gi], gi, idx);
+}
+function mobile(){
+  const box=document.getElementById('mobileview');
+  DATA.groups.forEach((g,gi)=>{
+    box.insertAdjacentHTML('beforeend', `<div class="mrow" id="mrow${gi}">${mobileHTML(g,gi,0)}</div>`);
+  });
+  box.insertAdjacentHTML('beforeend',
+    `<div class="mnote">資料更新：${DATA.updated}（台北）· 紅漲綠跌<br>ETF＝市價不含息報酬；基金/全委＝官方含息含撥回。僅供參考，非投資建議。</div>`);
+}
+
+/* ---- 檢視切換：預設依螢幕寬度，選擇記在 localStorage ---- */
+function setView(mob, save){
+  document.body.classList.toggle('mob', mob);
+  const bm=document.getElementById('btnMob'), bd=document.getElementById('btnDesk');
+  if(bm) bm.classList.toggle('on', mob);
+  if(bd) bd.classList.toggle('on', !mob);
+  if(save){ try{ localStorage.setItem('yf_view', mob?'m':'d'); }catch(e){} }
+}
+
+overview();cards();mobile();
+(function(){
+  let saved=null; try{ saved=localStorage.getItem('yf_view'); }catch(e){}
+  const mob = saved ? (saved==='m') : window.matchMedia('(max-width:560px)').matches;
+  setView(mob, false);
+})();
 </script>
 </body>
 </html>
