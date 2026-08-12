@@ -601,8 +601,8 @@ function buildCopyText(){
     gs.forEach(([g,gi])=>{
       const v=g.variants[mobSel[gi]||0], p=v.changePct;
       const nav=(v.nav!==null&&v.nav!==undefined)?v.nav:'—';
-      out+=chgArrow(p)+' '+g.name+curEmoji(v.currency)+'\n';
-      out+='　'+nav+'　'+fmtChgTxt(p)+'　'+(v.currency||'')+' · '+dshort(v.navDate)+'\n';
+      out+=chgArrow(p)+' '+g.name+'\n';
+      out+=nav+' '+fmtChgTxt(p)+'｜'+(v.currency||'')+'｜'+dshort(v.navDate)+'\n';
     });
   });
   out+='\n※紅漲綠跌｜🔴漲 🟢跌';
