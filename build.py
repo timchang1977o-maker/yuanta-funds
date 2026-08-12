@@ -593,19 +593,22 @@ function chgArrow(p){
 }
 function buildCopyText(){
   const d=(DATA.updated||'').slice(0,10).replace(/-/g,'/');
+  const DIV='————————————————';
+  const kinds=['etf','disc','fund'].filter(k=>DATA.groups.some(g=>g.kind===k));
   let out='📈 元大基金淨值追蹤\n🗓 '+d+'（台北）\n';
-  ['etf','disc','fund'].forEach(kind=>{
+  kinds.forEach((kind,ki)=>{
+    const star = ki>0 ? '🌟' : '';       // 首組不加星，其餘組標題加 🌟
+    out+='\n'+star+KGROUP[kind]+'\n\n';   // 標題後空一行
     const gs=DATA.groups.map((g,gi)=>[g,gi]).filter(x=>x[0].kind===kind);
-    if(!gs.length) return;
-    out+='\n'+KGROUP[kind]+'\n';
-    gs.forEach(([g,gi])=>{
+    gs.forEach(([g,gi],j)=>{
       const v=g.variants[mobSel[gi]||0], p=v.changePct;
       const nav=(v.nav!==null&&v.nav!==undefined)?v.nav:'—';
       out+=chgArrow(p)+' '+g.name+'\n';
       out+=nav+' '+fmtChgTxt(p)+'｜'+(v.currency||'')+'｜'+dshort(v.navDate)+'\n';
+      if(j<gs.length-1) out+='\n';        // 檔與檔之間空一行
     });
+    if(ki<kinds.length-1) out+=DIV+'\n';  // 組間分隔線（最後一組不放）
   });
-  out+='\n※紅漲綠跌｜🔴漲 🟢跌';
   return out;
 }
 function copyNavs(btn){
