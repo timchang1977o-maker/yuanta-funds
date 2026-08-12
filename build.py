@@ -588,8 +588,8 @@ function fmtChgTxt(p){
   return (p>0?'+':'−')+Math.abs(p).toFixed(2)+'%';
 }
 function chgArrow(p){
-  if(p===null||p===undefined||p===0) return '▪️';
-  return p>0?'🔺':'🔻';
+  if(p===null||p===undefined||p===0) return '⚪';
+  return p>0?'🔴':'🟢';  // 紅漲綠跌（三角形 emoji 無綠色版，故用紅/綠圓點）
 }
 function buildCopyText(){
   const d=(DATA.updated||'').slice(0,10).replace(/-/g,'/');
@@ -605,7 +605,7 @@ function buildCopyText(){
       out+='　'+nav+'　'+fmtChgTxt(p)+'　'+(v.currency||'')+' · '+dshort(v.navDate)+'\n';
     });
   });
-  out+='\n※紅漲綠跌｜🔺漲 🔻跌';
+  out+='\n※紅漲綠跌｜🔴漲 🟢跌';
   return out;
 }
 function copyNavs(btn){
