@@ -342,6 +342,10 @@ body.mob footer{display:none}
 .mrets .mr{flex:1;min-width:0;text-align:center;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:5px 2px}
 .mrets .mr .l{font-size:9.5px;color:var(--sub)}
 .mrets .mr .n{font-size:12.5px;font-weight:800;margin-top:2px}
+.copybtn{display:block;width:100%;font-family:inherit;font-size:15px;font-weight:800;color:#fff;background:var(--brand);border:none;border-radius:12px;padding:13px;margin-bottom:14px;cursor:pointer;box-shadow:var(--shadow);transition:background .12s,transform .05s}
+.copybtn:hover{background:var(--brand2)}
+.copybtn:active{transform:scale(.99)}
+.copybtn.ok{background:var(--accent)}
 </style>
 </head>
 <body>
@@ -396,6 +400,7 @@ const fmtPct = v => (v===null||v===undefined) ? '<span class="na">—</span>' :
   '<span class="'+(v>=0?'pos':'neg')+'">'+(v>=0?'+':'')+v.toFixed(2)+'%</span>';
 const kmap = {etf:['ETF','k-etf'],fund:['基金','k-fund'],disc:['全委','k-disc']};
 const fnav = v => (v.nav!==null&&v.nav!==undefined)?v.nav:'—';
+const mobSel = (DATA.groups||[]).map(()=>0);  // 手機好讀版每張卡目前選的幣別/級別 index
 
 function rowCells(g, gi, idx){
   const v=g.variants[idx], r=v.returns||{};
@@ -560,15 +565,63 @@ function mobileHTML(g, gi, idx){
     <div class="mrets">${retHtml}</div>`;
 }
 function switchMob(gi, idx){
+  mobSel[gi]=idx;
   document.getElementById('mrow'+gi).innerHTML = mobileHTML(DATA.groups[gi], gi, idx);
 }
 function mobile(){
   const box=document.getElementById('mobileview');
+  box.insertAdjacentHTML('beforeend', `<button class="copybtn" onclick="copyNavs(this)">📋 一鍵複製最新淨值</button>`);
   DATA.groups.forEach((g,gi)=>{
     box.insertAdjacentHTML('beforeend', `<div class="mrow" id="mrow${gi}">${mobileHTML(g,gi,0)}</div>`);
   });
   box.insertAdjacentHTML('beforeend',
     `<div class="mnote">資料更新：${DATA.updated}（台北）· 紅漲綠跌<br>ETF＝市價不含息報酬；基金/全委＝官方含息含撥回。僅供參考，非投資建議。</div>`);
+}
+
+/* ---- 一鍵複製：版本 B（分類 + 完整名稱 + 淨值日 + 幣別，emoji 易讀） ---- */
+const KGROUP={etf:'〔ETF〕', disc:'〔全委帳戶〕', fund:'〔共同基金〕'};
+const curEmoji=c=>/美元|USD/i.test(c||'')?' 💵':(/日圓|日圆|JPY/i.test(c||'')?' 💴':'');
+const dshort=d=>d?d.slice(5).replace('-','/'):'—';   // 2026-08-12 → 08/12
+function fmtChgTxt(p){
+  if(p===null||p===undefined) return '—';
+  if(p===0) return '0.00%';
+  return (p>0?'+':'−')+Math.abs(p).toFixed(2)+'%';
+}
+function chgArrow(p){
+  if(p===null||p===undefined||p===0) return '▪️';
+  return p>0?'🔺':'🔻';
+}
+function buildCopyText(){
+  const d=(DATA.updated||'').slice(0,10).replace(/-/g,'/');
+  let out='📈 元大基金淨值追蹤\n🗓 '+d+'（台北）\n';
+  ['etf','disc','fund'].forEach(kind=>{
+    const gs=DATA.groups.map((g,gi)=>[g,gi]).filter(x=>x[0].kind===kind);
+    if(!gs.length) return;
+    out+='\n'+KGROUP[kind]+'\n';
+    gs.forEach(([g,gi])=>{
+      const v=g.variants[mobSel[gi]||0], p=v.changePct;
+      const nav=(v.nav!==null&&v.nav!==undefined)?v.nav:'—';
+      out+=chgArrow(p)+' '+g.name+curEmoji(v.currency)+'\n';
+      out+='　'+nav+'　'+fmtChgTxt(p)+'　'+(v.currency||'')+' · '+dshort(v.navDate)+'\n';
+    });
+  });
+  out+='\n※紅漲綠跌｜🔺漲 🔻跌';
+  return out;
+}
+function copyNavs(btn){
+  const txt=buildCopyText();
+  const done=()=>{const o=btn.textContent;btn.textContent='✓ 已複製';btn.classList.add('ok');
+    setTimeout(()=>{btn.textContent=o;btn.classList.remove('ok');},1600);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done).catch(()=>fallbackCopy(txt,done));
+  }else{fallbackCopy(txt,done);}
+}
+function fallbackCopy(txt,done){
+  const ta=document.createElement('textarea');ta.value=txt;
+  ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  try{document.execCommand('copy');done();}catch(e){alert('複製失敗，請手動選取');}
+  document.body.removeChild(ta);
 }
 
 /* ---- 檢視切換：預設依螢幕寬度，選擇記在 localStorage ---- */
