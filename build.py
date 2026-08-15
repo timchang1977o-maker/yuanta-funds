@@ -220,13 +220,82 @@ def build_data():
                            'source': variants[0]['source'], 'variants': variants})
     return groups
 
+# ---------- 永不倒退高水位保護 ----------
+# 背景：鉅亨基金 API（fund.api.cnyes.com）對 GitHub 美國 runner 的 IP 會慢約一天
+# （origin 分區資料落後，實測 2026-08 確認；cache 招式無效）。若每次都用抓到的值直接覆蓋，
+# 網站會被舊值蓋回、看起來「卡住/沒變」。這裡用「已部署的 data.json」當跨 run 持久層：
+# 每次 build 先抓上一版已部署的 data.json，逐 variant 比 navDate，只有新抓到的 >= 已存的才採用，
+# 否則保留舊高水位；抓取失敗的 variant 也由舊資料回填，卡片不掉列。
+PAGES_DATA_URL = 'https://timchang1977o-maker.github.io/yuanta-funds/data.json'
+
+def _load_prev(here):
+    """回傳 (variant_idx, prev_groups_by_name)，取『線上已部署』與『本地 committed』中 navDate 最新者。"""
+    sources = []
+    try:
+        live = getj(PAGES_DATA_URL, tries=2)
+        sources.append(live)
+        print(f'[prev] 線上已部署 data.json updated={live.get("updated")}')
+    except Exception as e:
+        print(f'[prev] 線上 data.json 取不到（首次部署或 Pages 未含 data.json）：{e}')
+    try:
+        with open(os.path.join(here, 'data.json'), encoding='utf-8') as fp:
+            sources.append(json.load(fp))
+            print('[prev] 讀入本地 committed data.json 作為 seed/fallback')
+    except Exception:
+        pass
+    vidx, gidx = {}, {}
+    for src in sources:
+        for g in src.get('groups', []):
+            gidx.setdefault(g.get('name'), g)
+            for v in g.get('variants', []):
+                k = (g.get('name'), v.get('code'))
+                cur = vidx.get(k)
+                if cur is None or (v.get('navDate') or '') > (cur.get('navDate') or ''):
+                    vidx[k] = v
+    return vidx, gidx
+
+def _apply_never_regress(groups, vidx, gidx):
+    kept = carried = backfilled = 0
+    present = set()
+    for g in groups:
+        present.add(g['name'])
+        seen = set()
+        for i, v in enumerate(g['variants']):
+            code = v.get('code'); seen.add(code)
+            p = vidx.get((g['name'], code))
+            if p and (p.get('navDate') or '') > (v.get('navDate') or ''):
+                g['variants'][i] = {**p, 'label': v.get('label', p.get('label'))}
+                carried += 1
+            else:
+                kept += 1
+        # 回填本次抓取失敗、但舊資料有的 variant（維持定義順序）
+        order = [vv['code'] for gg in GROUPS if gg['name'] == g['name'] for vv in gg['variants']]
+        for (gn, code), p in vidx.items():
+            if gn == g['name'] and code not in seen:
+                g['variants'].append(dict(p)); backfilled += 1
+        if order:
+            g['variants'].sort(key=lambda v: order.index(v['code']) if v.get('code') in order else 99)
+    # 整個 group 都抓失敗 → 用舊資料整組還原
+    restored = 0
+    for name, pg in gidx.items():
+        if name not in present:
+            groups.append(pg); restored += 1
+    print(f'[never-regress] 用新值 {kept}、保留舊高水位 {carried}、回填失敗 variant {backfilled}、還原整組 {restored}')
+    return groups
+
 def main():
+    here = os.path.dirname(os.path.abspath(__file__))
     groups = build_data()
+    vidx, gidx = _load_prev(here)
+    groups = _apply_never_regress(groups, vidx, gidx)
+    # 保留 GROUPS 定義的組別順序
+    gorder = [g['name'] for g in GROUPS]
+    groups.sort(key=lambda g: gorder.index(g['name']) if g['name'] in gorder else 99)
     payload = {
         'updated': datetime.datetime.now(TPE).strftime('%Y-%m-%d %H:%M'),
+        'dataAsOf': max((v.get('navDate') or '' for g in groups for v in g['variants']), default=''),
         'groups': groups,
     }
-    here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, 'data.json'), 'w', encoding='utf-8') as fp:
         json.dump(payload, fp, ensure_ascii=False, indent=1)
     html = render_html(payload)
