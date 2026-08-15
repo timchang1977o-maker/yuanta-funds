@@ -1,0 +1,55 @@
+name: NAV Source Probe (US runner)
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          python3 - <<'PY'
+          import urllib.request, ssl, json, time, datetime
+          ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
+          def hit(url, method='GET', data=None, hdr=None, label=''):
+              h={'User-Agent':'Mozilla/5.0','Cache-Control':'no-cache','Pragma':'no-cache'}
+              if hdr: h.update(hdr)
+              req=urllib.request.Request(url, method=method, data=data, headers=h)
+              t0=time.time()
+              try:
+                  r=urllib.request.urlopen(req, context=ctx, timeout=30)
+                  body=r.read().decode('utf-8','replace'); ms=int((time.time()-t0)*1000)
+                  return r.status, ms, body, dict(r.headers)
+              except Exception as e:
+                  return 'ERR', int((time.time()-t0)*1000), str(e), {}
+          def cnyes_latest(fid, extra=''):
+              url=f'https://fund.api.cnyes.com/fund/api/v1/funds/{fid}/nav?days=8'+extra
+              st,ms,body,hd=hit(url,label='cnyes '+fid)
+              latest='?'
+              try:
+                  d=json.loads(body)['items']; pairs=sorted(zip(d.get('tradeDate') or [], d.get('nav') or []))
+                  t,v=pairs[-1]; latest=f'{datetime.date.fromtimestamp(t)}={v}'
+              except Exception as e: latest='parse-err:'+str(e)[:40]
+              cc=hd.get('Cache-Control','') if isinstance(hd,dict) else ''
+              print(f'  [cnyes {fid:8s}] {st} {ms}ms latest={latest}  cc={cc[:40]}')
+          print('=== runner geo ===')
+          st,ms,body,_=hit('https://ipinfo.io/json')
+          try: j=json.loads(body); print(f'  runner IP {j.get("ip")} {j.get("country")}/{j.get("region")} ({j.get("org","")[:30]})')
+          except: print('  ipinfo err', body[:80])
+          print('=== A. cnyes fund.api (current source) ===')
+          for fid in ['A05225','A05219','A05183']:
+              cnyes_latest(fid)
+          print('  -- with cache-bust param --')
+          cnyes_latest('A05225', extra=f'&_={int(time.time())}')
+          print('=== B. 元大投信 api.yuantafunds.com reachability (geo-block?) ===')
+          base='https://api.yuantafunds.com/ectranslation/api/trans?APIType=EC2API&AppName=FundWeb&PageName=%2Fmyfund%2Foverview&Device=4&DeviceId=probe&FuncId='
+          for fn in ['App%2FGetPopularFund&isApp=false','FundPerformance&FundId=1008']:
+              st,ms,body,_=hit(base+fn)
+              print(f'  [{fn[:28]:28s}] {st} {ms}ms  body[:80]={body[:80]!r}')
+          print('=== C. SITCA 公會 reachability ===')
+          st,ms,body,_=hit('https://www.sitca.org.tw/ROC/Industry/IN2211.aspx?PGMID=FD01')
+          print(f'  [SITCA IN2211] {st} {ms}ms len={len(body)}')
+          print('=== D. co.cnyes (known US-fresh host) sanity ===')
+          st,ms,body,_=hit('https://co.cnyes.com/api/YuantaLife/carteblanche', 'GET', None, {'Origin':'https://co.cnyes.com','Referer':'https://co.cnyes.com/'})
+          print(f'  [co.cnyes] {st} {ms}ms body[:80]={body[:80]!r}')
+          print('DONE', datetime.datetime.utcnow().isoformat())
+          PY
