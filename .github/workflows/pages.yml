@@ -2,13 +2,12 @@ name: Build & Deploy Fund Page
 
 on:
   schedule:
-    # 台北 = UTC+8。平日多時段更新，涵蓋盤後/晚間/隔日早上才公布的境外基金淨值
-    - cron: '30 0 * * 1-5'    # 08:30 台北 — 抓前一日晚間/隔日才更新的境外基金淨值
-    - cron: '30 4 * * 1-5'    # 12:30 台北 — 午間
-    - cron: '30 7 * * 1-5'    # 15:30 台北 — 台股收盤後 ETF 收盤價定案
-    - cron: '0 10 * * 1-5'    # 18:00 台北 — 晚間，境內基金淨值陸續公布
-    - cron: '30 12 * * 1-5'   # 20:30 台北 — 晚間第二輪
-    - cron: '30 14 * * 1-5'   # 22:30 台北 — 收尾，補齊當日全部淨值
+    - cron: '30 0 * * 1-5'
+    - cron: '30 4 * * 1-5'
+    - cron: '30 7 * * 1-5'
+    - cron: '0 10 * * 1-5'
+    - cron: '30 12 * * 1-5'
+    - cron: '30 14 * * 1-5'
   workflow_dispatch:
   push:
     branches: [main]
@@ -35,6 +34,7 @@ jobs:
           python3 build.py
           mkdir -p public
           cp "元大基金淨值與表現.html" public/index.html
+          cp data.json public/data.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
