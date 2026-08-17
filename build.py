@@ -423,11 +423,12 @@ body.mob footer{display:none}
 .cpmini{font-family:inherit;font-size:11.5px;font-weight:700;color:var(--brand);background:#fff;border:1px solid var(--line);border-radius:7px;padding:3px 9px;margin-left:5px;cursor:pointer}
 .cpmini:active{transform:scale(.97)}
 .cpgrp{margin-bottom:9px}
-.cpgname{font-size:12.5px;font-weight:800;color:var(--fg);margin-bottom:5px}
-.cpvars{display:flex;flex-wrap:wrap;gap:6px}
-.cpchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--sub);background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;user-select:none}
-.cpchip.on{color:#fff;background:var(--brand);border-color:var(--brand)}
-.cpchip input{margin:0;accent-color:#fff;width:14px;height:14px;cursor:pointer}
+.cpgname{font-size:12.5px;font-weight:800;color:var(--fg);margin-bottom:3px}
+.cpvars{display:flex;flex-direction:column;gap:1px}
+.cprow{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:var(--fg);background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;user-select:none}
+.cprow:active{transform:scale(.995)}
+.cprow.on{color:var(--brand);border-color:var(--brand);background:#f2f6fd}
+.cprow input{margin:0;width:17px;height:17px;accent-color:var(--brand);cursor:pointer;flex:none}
 </style>
 </head>
 <body>
@@ -723,7 +724,7 @@ function copyPanelHTML(){
     h+='<div class="cpgrp"><div class="cpgname">'+g.name+'</div><div class="cpvars">';
     g.variants.forEach((v,vi)=>{
       const on=copySel.has(gi+':'+vi);
-      h+='<label class="cpchip'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+
+      h+='<label class="cprow'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+
          ' onchange="toggleCopySel('+gi+','+vi+',this)">'+(v.label||v.currency||'預設')+'</label>';
     });
     h+='</div></div>';
@@ -742,7 +743,7 @@ function toggleCopyPanel(btn){
 function toggleCopySel(gi,vi,el){
   const k=gi+':'+vi;
   if(el.checked) copySel.add(k); else copySel.delete(k);
-  el.closest('.cpchip').classList.toggle('on', el.checked);
+  el.closest('.cprow').classList.toggle('on', el.checked);
   const c=document.getElementById('cpcount'); if(c) c.textContent=copySel.size;
 }
 function copySelAll(on){
