@@ -415,6 +415,19 @@ body.mob footer{display:none}
 .copybtn:hover{background:var(--brand2)}
 .copybtn:active{transform:scale(.99)}
 .copybtn.ok{background:var(--accent)}
+.copybtn.ghost{background:#eef2f9;color:var(--brand);box-shadow:none;font-size:13.5px;padding:10px;margin-bottom:12px}
+.copybtn.ghost:hover{background:#e2e9f5}
+.cppanel{display:none;background:#f7f9fd;border:1px solid var(--line);border-radius:12px;padding:12px 12px 4px;margin-bottom:14px}
+.cppanel.open{display:block}
+.cpsel-head{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;font-weight:800;color:var(--sub);margin-bottom:10px}
+.cpmini{font-family:inherit;font-size:11.5px;font-weight:700;color:var(--brand);background:#fff;border:1px solid var(--line);border-radius:7px;padding:3px 9px;margin-left:5px;cursor:pointer}
+.cpmini:active{transform:scale(.97)}
+.cpgrp{margin-bottom:9px}
+.cpgname{font-size:12.5px;font-weight:800;color:var(--fg);margin-bottom:5px}
+.cpvars{display:flex;flex-wrap:wrap;gap:6px}
+.cpchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--sub);background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;user-select:none}
+.cpchip.on{color:#fff;background:var(--brand);border-color:var(--brand)}
+.cpchip input{margin:0;accent-color:#fff;width:14px;height:14px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -640,6 +653,8 @@ function switchMob(gi, idx){
 function mobile(){
   const box=document.getElementById('mobileview');
   box.insertAdjacentHTML('beforeend', `<button class="copybtn" onclick="copyNavs(this)">📋 一鍵複製最新淨值</button>`);
+  box.insertAdjacentHTML('beforeend', `<button class="copybtn ghost" onclick="toggleCopyPanel(this)">☑️ 自訂複製項目／幣別</button>`);
+  box.insertAdjacentHTML('beforeend', `<div class="cppanel" id="cppanel"></div>`);
   DATA.groups.forEach((g,gi)=>{
     box.insertAdjacentHTML('beforeend', `<div class="mrow" id="mrow${gi}">${mobileHTML(g,gi,0)}</div>`);
   });
@@ -660,30 +675,90 @@ function chgArrow(p){
   if(p===null||p===undefined||p===0) return '⚪';
   return p>0?'🔴':'🟢';  // 紅漲綠跌（三角形 emoji 無綠色版，故用紅/綠圓點）
 }
-function buildCopyText(){
+/* 一行淨值：例「10.52 +0.30%｜新台幣｜08/12」 */
+function navLine(v){
+  const nav=(v.nav!==null&&v.nav!==undefined)?v.nav:'—';
+  return nav+' '+fmtChgTxt(v.changePct)+'｜'+(v.currency||v.label||'')+'｜'+dshort(v.navDate);
+}
+/* sel = Set of "gi:vi"（勾選的 group:variant）。未帶則用各組目前選的幣別（＝一鍵複製舊行為） */
+function buildCopyText(sel){
+  if(!sel){ sel=new Set(); DATA.groups.forEach((g,gi)=>sel.add(gi+':'+(mobSel[gi]||0))); }
+  const has=(gi,vi)=>sel.has(gi+':'+vi);
+  const grpSelVars=(g,gi)=>g.variants.map((v,vi)=>[v,vi]).filter(([v,vi])=>has(gi,vi));
   const d=(DATA.updated||'').slice(0,10).replace(/-/g,'/');
   const DIV='————————————————';
-  const kinds=['etf','disc','fund'].filter(k=>DATA.groups.some(g=>g.kind===k));
+  const kinds=['etf','disc','fund'].filter(k=>
+    DATA.groups.some((g,gi)=>g.kind===k && grpSelVars(g,gi).length));
   let out='📈 元大基金淨值追蹤\n🗓 '+d+'（台北）\n';
   kinds.forEach((kind,ki)=>{
     const star = ki>0 ? '🌟' : '';       // 首組不加星，其餘組標題加 🌟
     out+='\n'+star+KGROUP[kind]+'\n\n';   // 標題後空一行
-    const gs=DATA.groups.map((g,gi)=>[g,gi]).filter(x=>x[0].kind===kind);
+    const gs=DATA.groups.map((g,gi)=>[g,gi]).filter(([g,gi])=>g.kind===kind && grpSelVars(g,gi).length);
     gs.forEach(([g,gi],j)=>{
-      const v=g.variants[mobSel[gi]||0], p=v.changePct;
-      const nav=(v.nav!==null&&v.nav!==undefined)?v.nav:'—';
-      out+=chgArrow(p)+' '+g.name+'\n';
-      out+=nav+' '+fmtChgTxt(p)+'｜'+(v.currency||'')+'｜'+dshort(v.navDate)+'\n';
+      const vs=grpSelVars(g,gi);
+      if(vs.length===1){                  // 單一幣別：名稱行帶漲跌燈（維持舊格式）
+        const [v]=vs[0];
+        out+=chgArrow(v.changePct)+' '+g.name+'\n'+navLine(v)+'\n';
+      }else{                              // 多幣別：名稱一行，各幣別各一行帶燈
+        out+='📊 '+g.name+'\n';
+        vs.forEach(([v])=>{ out+=chgArrow(v.changePct)+' '+navLine(v)+'\n'; });
+      }
       if(j<gs.length-1) out+='\n';        // 檔與檔之間空一行
     });
     if(ki<kinds.length-1) out+=DIV+'\n';  // 組間分隔線（最後一組不放）
   });
   return out;
 }
-function copyNavs(btn){
-  const txt=buildCopyText();
-  const done=()=>{const o=btn.textContent;btn.textContent='✓ 已複製';btn.classList.add('ok');
-    setTimeout(()=>{btn.textContent=o;btn.classList.remove('ok');},1600);};
+
+/* ---- 自訂複製：勾選要哪幾檔／哪些幣別 ---- */
+let copySel=null;                         // Set of "gi:vi"，延後初始化
+function initCopySel(){                   // 預設＝各組目前顯示的幣別
+  copySel=new Set(); DATA.groups.forEach((g,gi)=>copySel.add(gi+':'+(mobSel[gi]||0)));
+}
+function copyPanelHTML(){
+  let h='<div class="cpsel-head"><span>勾選要複製的項目／幣別</span>'+
+        '<span><button class="cpmini" onclick="copySelAll(true)">全選</button>'+
+        '<button class="cpmini" onclick="copySelAll(false)">清除</button></span></div>';
+  DATA.groups.forEach((g,gi)=>{
+    h+='<div class="cpgrp"><div class="cpgname">'+g.name+'</div><div class="cpvars">';
+    g.variants.forEach((v,vi)=>{
+      const on=copySel.has(gi+':'+vi);
+      h+='<label class="cpchip'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+
+         ' onchange="toggleCopySel('+gi+','+vi+',this)">'+(v.label||v.currency||'預設')+'</label>';
+    });
+    h+='</div></div>';
+  });
+  h+='<button class="copybtn" onclick="copySelected(this)">📋 複製所選（<span id="cpcount">'+
+     copySel.size+'</span> 項）</button>';
+  return h;
+}
+function toggleCopyPanel(btn){
+  const p=document.getElementById('cppanel');
+  if(!copySel) initCopySel();
+  const open=p.classList.toggle('open');
+  if(open) p.innerHTML=copyPanelHTML();
+  btn.textContent=open?'▲ 收合自訂選取':'☑️ 自訂複製項目／幣別';
+}
+function toggleCopySel(gi,vi,el){
+  const k=gi+':'+vi;
+  if(el.checked) copySel.add(k); else copySel.delete(k);
+  el.closest('.cpchip').classList.toggle('on', el.checked);
+  const c=document.getElementById('cpcount'); if(c) c.textContent=copySel.size;
+}
+function copySelAll(on){
+  copySel=new Set();
+  if(on) DATA.groups.forEach((g,gi)=>g.variants.forEach((v,vi)=>copySel.add(gi+':'+vi)));
+  document.getElementById('cppanel').innerHTML=copyPanelHTML();
+}
+function copySelected(btn){
+  if(!copySel||!copySel.size){ btn.textContent='⚠ 尚未勾選項目';
+    setTimeout(()=>{btn.innerHTML='📋 複製所選（<span id="cpcount">0</span> 項）';},1400); return; }
+  doCopy(buildCopyText(copySel), btn, '✓ 已複製 '+copySel.size+' 項');
+}
+function copyNavs(btn){ doCopy(buildCopyText(), btn, '✓ 已複製'); }
+function doCopy(txt, btn, okLabel){
+  const done=()=>{const o=btn.innerHTML;btn.textContent=okLabel;btn.classList.add('ok');
+    setTimeout(()=>{btn.innerHTML=o;btn.classList.remove('ok');},1600);};
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(txt).then(done).catch(()=>fallbackCopy(txt,done));
   }else{fallbackCopy(txt,done);}
