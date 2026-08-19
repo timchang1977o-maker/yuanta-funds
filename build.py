@@ -281,7 +281,7 @@ def _apply_fresh_nav(result, fid, fresh):
     if yuanta_id:
         try:
             fx = _yuanta_nav(yuanta_id)
-            source_label = '元大投信官方 FundNAV'
+            source_label = '元大投信 FundNAV'
         except Exception as e:
             print(f'[fresh-nav] 元大投信官方 FundNAV 失敗 fid={fid}: {e}', file=sys.stderr)
     if not fx:
