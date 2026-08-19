@@ -169,12 +169,41 @@ def _r(x):
 # ---------- 官方每日淨值校正層（治 cnyes fund.api 落後） ----------
 # 背景：cnyes fund.api 資料落後不是單純 GitHub 美國 runner IP 慢——2026-08-17 從本機直連
 # 驗證，cnyes 自己的 origin 就卡在舊日期（updatedAt 剛 refresh 但 tradeDate 沒進）。
-# 要開放給全公司同仁用，不能只靠「永不倒退」被動等 cnyes 追上，改用兩個法定揭露官方源
-# 校正「最新一筆」淨值：SITCA（投信投顧公會）每日淨值 CSV 為主，fundclear.com.tw
-# （基金資訊觀測站）查詢 API 備援；兩者互為備援、皆免驗證的公開 HTTP 端點。
+# 要開放給全公司同仁用，不能只靠「永不倒退」被動等 cnyes 追上，改用官方源校正「最新一筆」淨值。
 # cnyes fund.api 仍保留，是唯一有長期歷史走勢＋官方 YTD/1M/3M/1Y/3Y 期間報酬的來源。
+#
+# 2026-08-19 debug：Evan 回報多重資產基金比元大投信官網慢 2+ 小時、「正常應該中午就有數字」。
+# 查證：SITCA CSV／fundclear 兩個法定揭露源當天下午 17:30~18:00 台北才把前一交易日淨值放出來，
+# 元大投信自家網站（www.yuantafunds.com）比這兩個產業彙整源快。用 Playwright 掛網也發現該站
+# 個別基金頁會呼叫 api.yuantafunds.com/ectranslation/api/trans?...&FuncId=FundNAV&FundId={id}，
+# 直接回傳逐日 NAV 序列。原以為此站是「FUND_ID+FuncId+PublicKey handshake 私有加密 gateway」
+# 無法用（2026-08-17 判斷），但實測這支 FundNAV 端點本身**不需要**PublicKey handshake、不需要
+# cookie/session，純 GET 帶查詢參數即可（DeviceId 可隨意填、不驗證）——是可以直接 curl 的公開
+# 端點。改為官方源優先序：**元大投信官方 FundNAV → SITCA CSV → fundclear**，SITCA/fundclear
+# 保留當備援（怕元大投信改版擋掉這支端點）。
+YUANTA_NAV_API = 'https://api.yuantafunds.com/ectranslation/api/trans'
 SITCA_NAV_CSV = 'https://www.sitca.org.tw/MemberK0000/F/03/nav.csv'
 FUNDCLEAR_API = 'https://www.fundclear.com.tw/api/search/fund/query-fund'
+
+# cnyesId -> 元大投信官網內部 FundId（Playwright 掛網 + 搜尋各級別頁面取得，2026-08-19）
+YUANTA_ID_MAP = {
+    'A05219': '1256', 'A05225': '1262', 'A05231': '1268',
+    'A05183': '1234', 'A05185': '1240', 'A05187': '1242',
+    'A3PCXt7': '1202', 'A3i7xFp': '1203',
+    'A05158': '1209', 'A05160': '1210',
+}
+
+def _yuanta_nav(fund_id):
+    """回傳 {nav, navDate} 或 None；元大投信官方 FundNAV 端點，NAV[0] 是最新一筆。"""
+    url = (f'{YUANTA_NAV_API}?APIType=EC2API&AppName=FundWeb&PageName=%2F&Device=4'
+           f'&DeviceId=00000000-0000-0000-0000-000000000000&FuncId=FundNAV&FundId={fund_id}')
+    data = getj(url, headers={'Referer': f'https://www.yuantafunds.com/myfund/information/{fund_id}'})
+    nav = (data.get('Data') or {}).get('NAV') or []
+    if not nav:
+        return None
+    n = nav[0]
+    d = str(n['NAV_DATE'])
+    return {'nav': float(n['NAV_B']), 'navDate': f'{d[:4]}-{d[4:6]}-{d[6:]}'}
 
 # cnyesId -> (SITCA/fundclear 基金統編「基金代號」, fundclear 查詢用基金名稱關鍵字)
 FRESH_NAV_MAP = {
@@ -244,9 +273,21 @@ def _fresh_nav_map():
 def _apply_fresh_nav(result, fid, fresh):
     # change/changePct 一律用「前一筆序列淨值」自算，不信任來源自帶的漲跌欄位——
     # 實測 fundclear changeRatio 語意不是日漲跌%（量級對不上，疑似累積報酬），SITCA CSV
-    # 的漲跌欄位雖驗證正確，但兩源統一自算可避免未來任一邊語意跑掉時悄悄帶入錯數字。
-    stat_id = FRESH_NAV_MAP.get(fid, (None,))[0]
-    fx = fresh.get(stat_id) if stat_id else None
+    # 的漲跌欄位雖驗證正確，但統一自算可避免任一來源語意跑掉時悄悄帶入錯數字。
+    #
+    # 源優先序：元大投信官方 FundNAV（該基金公司自己最快公告）→ SITCA CSV → fundclear。
+    fx, source_label = None, None
+    yuanta_id = YUANTA_ID_MAP.get(fid)
+    if yuanta_id:
+        try:
+            fx = _yuanta_nav(yuanta_id)
+            source_label = '元大投信官方 FundNAV'
+        except Exception as e:
+            print(f'[fresh-nav] 元大投信官方 FundNAV 失敗 fid={fid}: {e}', file=sys.stderr)
+    if not fx:
+        stat_id = FRESH_NAV_MAP.get(fid, (None,))[0]
+        fx = fresh.get(stat_id) if stat_id else None
+        source_label = 'SITCA／fundclear'
     if not fx or not fx['navDate'] or fx['navDate'] <= (result.get('navDate') or ''):
         return result
     prev_nav = None
@@ -262,7 +303,7 @@ def _apply_fresh_nav(result, fid, fresh):
     if prev_nav:
         result['change'] = round(fx['nav'] - prev_nav, 2)
         result['changePct'] = pct(fx['nav'], prev_nav)
-    result['source'] = result['source'] + '；最新一筆以 SITCA／fundclear 官方公告日淨值校正'
+    result['source'] = result['source'] + f'；最新一筆以{source_label}官方公告日淨值校正'
     return result
 
 # ---------- 抓全部 ----------
@@ -577,7 +618,7 @@ body.mob footer{display:none}
   <div id="mobileview"></div>
 
   <footer>
-    <b>資料來源</b>：ETF（00990A）＝FinMind／TWSE 日線（市價收盤、<b>不含息</b>之市價報酬）；共同基金＝鉅亨 fund.api（晨星官方歷史走勢/各期報酬），最新一筆淨值以 SITCA 投信投顧公會／fundclear 基金資訊觀測站兩個官方法定揭露源校正（避免 cnyes 資料落後）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
+    <b>資料來源</b>：ETF（00990A）＝FinMind／TWSE 日線（市價收盤、<b>不含息</b>之市價報酬）；共同基金＝鉅亨 fund.api（晨星官方歷史走勢/各期報酬），最新一筆淨值以元大投信官方 FundNAV／SITCA 投信投顧公會／fundclear 基金資訊觀測站三個官方源依序校正（避免 cnyes 資料落後）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
     <b>說明</b>：有多幣別／配息級別的標的，於卡片右上下拉切換（總覽表顯示預設級別）。全委帳戶（元元致富·財富雙利/雙享）為投資型保單之類全權委託帳戶，走勢圖為「含撥回報酬指數（基準 100）」而非單位淨值曲線；「近1年/近3年」在成立未滿期間顯示「—」。本頁僅供參考，非投資建議；實際淨值以各機構公告為準。
   </footer>
 </div>
