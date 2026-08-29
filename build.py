@@ -293,7 +293,15 @@ def _apply_fresh_nav(result, fid, fresh):
     prev_nav = None
     if result.get('series') is not None:
         s = list(result['series'])
-        if not s or s[-1][0] != fx['navDate']:
+        # cnyes 對「最新一筆」的 tradeDate 標記會事後修正（同一交易日的淨值，
+        # 隔次抓取時日期往前挪一天）。若官方新值跟序列最後一筆數值相同，代表
+        # 那其實是同一個交易日被標了兩次日期，不是真的「一天沒漲跌」——
+        # 直接校正最後一筆的日期，改跟倒數第二筆比算漲跌，避免假的 0.00%。
+        if s and round(s[-1][1], 4) == round(fx['nav'], 4):
+            if len(s) >= 2:
+                prev_nav = s[-2][1]
+            s[-1] = [fx['navDate'], round(fx['nav'], 4)]
+        elif not s or s[-1][0] != fx['navDate']:
             if s:
                 prev_nav = s[-1][1]
             s.append([fx['navDate'], round(fx['nav'], 4)])
