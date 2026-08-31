@@ -530,7 +530,10 @@ tbody tr:hover td:first-child{background:#fafcff}
 .card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px;white-space:nowrap}
 .card .navnow .chg{font-size:12.5px;font-weight:700;margin-top:3px}
 .retrow{display:flex;gap:6px;margin:12px 0 6px;flex-wrap:wrap}
-.ret{flex:1;min-width:52px;background:#f7f9fd;border:1px solid var(--line);border-radius:9px;padding:7px 6px;text-align:center}
+.ret{flex:1;min-width:52px;background:#f7f9fd;border:1px solid var(--line);border-radius:9px;padding:7px 6px;text-align:center;cursor:pointer;transition:background .12s,border-color .12s;font-family:inherit}
+.ret:hover{background:#eef2f9}
+.ret.active{background:var(--brand);border-color:var(--brand)}
+.ret.active .l,.ret.active .n{color:#fff}
 .ret .l{font-size:10.5px;color:var(--sub)}
 .ret .n{font-size:14px;font-weight:800;margin-top:2px}
 .chartbox{position:relative;margin-top:6px}
@@ -638,6 +641,21 @@ const fmtPct = v => (v===null||v===undefined) ? '<span class="na">—</span>' :
 const kmap = {etf:['ETF','k-etf'],fund:['基金','k-fund'],disc:['全委','k-disc']};
 const fnav = v => (v.nav!==null&&v.nav!==undefined)?v.nav:'—';
 const mobSel = (DATA.groups||[]).map(()=>0);  // 手機好讀版每張卡目前選的幣別/級別 index
+const cardIdx = (DATA.groups||[]).map(()=>0);  // 完整版每張卡目前選的幣別/級別 index
+const chartRange = {};  // gi -> 'ytd'|'m1'|'m3'|'y1'|'y3'（點選走勢圖上方期間按鈕後套用），未設=全部走勢
+function filterSeries(series, key){
+  if(!series||series.length<2||!key) return series;
+  const last=new Date(series[series.length-1][0]);
+  let from;
+  if(key==='ytd') from=new Date(last.getFullYear(),0,1);
+  else if(key==='m1'){ from=new Date(last); from.setMonth(from.getMonth()-1); }
+  else if(key==='m3'){ from=new Date(last); from.setMonth(from.getMonth()-3); }
+  else if(key==='y1'){ from=new Date(last); from.setFullYear(from.getFullYear()-1); }
+  else if(key==='y3'){ from=new Date(last); from.setFullYear(from.getFullYear()-3); }
+  else return series;
+  const filtered=series.filter(p=>new Date(p[0])>=from);
+  return filtered.length>=2 ? filtered : series;
+}
 
 function rowCells(g, gi, idx){
   const v=g.variants[idx], r=v.returns||{};
@@ -665,8 +683,8 @@ function overview(){
 }
 
 /* ---- 迷你折線圖（inline SVG） ---- */
-function lineChart(f){
-  const s=f.series;
+function lineChart(f, rangeKey){
+  const s=filterSeries(f.series, rangeKey);
   const W=340,H=132,padL=6,padR=6,padT=14,padB=18;
   if(!s||s.length<2){
     return barChart(f);
@@ -761,20 +779,27 @@ function cardHTML(g, gi, idx){
   const chgtxt=(v.change!==null&&v.change!==undefined?((v.change>=0?'+':'')+v.change+' '):'')+
     ((v.changePct===null||v.changePct===undefined)?'':((v.changePct>=0?'+':'')+v.changePct+'%'));
   const chgcls=(v.changePct>=0)?'pos':'neg';
-  const rets=[['YTD',r.ytd],['近1月',r.m1],['近3月',r.m3],['近1年',r.y1],['近3年',r.y3]];
-  const retHtml=rets.map(x=>`<div class="ret"><div class="l">${x[0]}</div><div class="n ${x[1]===null||x[1]===undefined?'na':(x[1]>=0?'pos':'neg')}">${x[1]===null||x[1]===undefined?'—':((x[1]>=0?'+':'')+x[1].toFixed(2)+'%')}</div></div>`).join('');
+  const rk = chartRange[gi];
+  const rets=[['YTD','ytd',r.ytd],['近1月','m1',r.m1],['近3月','m3',r.m3],['近1年','y1',r.y1],['近3年','y3',r.y3]];
+  const retHtml=rets.map(x=>`<div class="ret${rk===x[1]?' active':''}" onclick="setChartRange(${gi},'${x[1]}')" title="點選切換走勢圖區間"><div class="l">${x[0]}</div><div class="n ${x[2]===null||x[2]===undefined?'na':(x[2]>=0?'pos':'neg')}">${x[2]===null||x[2]===undefined?'—':((x[2]>=0?'+':'')+x[2].toFixed(2)+'%')}</div></div>`).join('');
   return `<div class="ctop">
       <div><h3>${g.name}<span class="kchip ${k[1]}">${k[0]}</span></h3>
         <div class="code">${v.code} · ${sel}</div></div>
       <div class="navnow"><div class="v">${fnav(v)}</div><div class="d">${v.navLabel} · ${v.navDate||''}</div>${chgtxt?`<div class="chg ${chgcls}">${chgtxt}</div>`:''}</div>
     </div>
     <div class="retrow">${retHtml}</div>
-    <div style="font-size:11.5px;color:var(--sub);margin:2px 2px 4px">${v.seriesLabel}</div>
-    ${lineChart(v)}
+    <div style="font-size:11.5px;color:var(--sub);margin:2px 2px 4px">${v.seriesLabel}${rk?'（區間：'+({ytd:'YTD',m1:'近1月',m3:'近3月',y1:'近1年',y3:'近3年'}[rk])+'，點同一按鈕可還原全部走勢）':''}</div>
+    ${lineChart(v, rk)}
     <div class="cnote">${g.note||''}</div>`;
 }
 function switchVar(gi, idx){
+  cardIdx[gi]=idx;
+  chartRange[gi]=null;
   document.getElementById('card'+gi).innerHTML = cardHTML(DATA.groups[gi], gi, idx);
+}
+function setChartRange(gi, key){
+  chartRange[gi] = (chartRange[gi]===key) ? null : key;
+  document.getElementById('card'+gi).innerHTML = cardHTML(DATA.groups[gi], gi, cardIdx[gi]);
 }
 function cards(){
   const box=document.getElementById('cards');
