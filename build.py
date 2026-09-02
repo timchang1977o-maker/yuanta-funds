@@ -568,6 +568,15 @@ body.mob footer{display:none}
 .mrets .mr{flex:1;min-width:0;text-align:center;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:5px 2px}
 .mrets .mr .l{font-size:9.5px;color:var(--sub)}
 .mrets .mr .n{font-size:12.5px;font-weight:800;margin-top:2px}
+.mchart{margin-top:10px}
+.mchart svg{display:block;width:100%;height:120px;overflow:visible}
+.mimgbtns{display:flex;gap:8px;margin-top:10px}
+.imgbtn{flex:1;font-family:inherit;font-size:12px;font-weight:700;color:var(--brand);background:var(--chip);border:1px solid var(--line);border-radius:9px;padding:8px 4px;cursor:pointer;transition:background .12s,transform .05s}
+.imgbtn:active{transform:scale(.98)}
+.imgbtn.ok{background:var(--accent);color:#fff;border-color:var(--accent)}
+.imgbtn.err{background:#fdeceb;color:#c0392b;border-color:#f3c9c5}
+.imgbar{display:flex;gap:10px;margin-bottom:14px}
+.imgbar .copybtn{margin-bottom:0}
 .copybtn{display:block;width:100%;font-family:inherit;font-size:15px;font-weight:800;color:#fff;background:var(--brand);border:none;border-radius:12px;padding:13px;margin-bottom:14px;cursor:pointer;box-shadow:var(--shadow);transition:background .12s,transform .05s}
 .copybtn:hover{background:var(--brand2)}
 .copybtn:active{transform:scale(.99)}
@@ -824,7 +833,12 @@ function mobileHTML(g, gi, idx){
         <div class="msub">${v.code} · ${sel} · ${v.navDate||''}</div></div>
       <div class="mnav"><div class="v">${fnav(v)}</div><div class="u">${v.navLabel}</div>${chgtxt?`<div class="c ${chgcls}">${chgtxt}</div>`:''}</div>
     </div>
-    <div class="mrets">${retHtml}</div>`;
+    <div class="mrets">${retHtml}</div>
+    <div class="mchart">${lineChart(v, null)}</div>
+    <div class="mimgbtns">
+      <button class="imgbtn" onclick="saveCardImage(${gi},${idx},this)">📤 存到相簿</button>
+      <button class="imgbtn" onclick="copyCardImage(${gi},${idx},this)">📋 複製圖片</button>
+    </div>`;
 }
 function switchMob(gi, idx){
   mobSel[gi]=idx;
@@ -835,6 +849,10 @@ function mobile(){
   box.insertAdjacentHTML('beforeend', `<button class="copybtn" onclick="copyNavs(this)">📋 一鍵複製最新淨值</button>`);
   box.insertAdjacentHTML('beforeend', `<button class="copybtn ghost" onclick="toggleCopyPanel(this)">☑️ 自訂複製項目／幣別</button>`);
   box.insertAdjacentHTML('beforeend', `<div class="cppanel" id="cppanel"></div>`);
+  box.insertAdjacentHTML('beforeend', `<div class="imgbar">
+      <button class="copybtn ghost" style="margin-bottom:0" onclick="saveAllImage(this)">📤 存整頁圖片</button>
+      <button class="copybtn ghost" style="margin-bottom:0" onclick="copyAllImage(this)">📋 複製整頁圖片</button>
+    </div>`);
   DATA.groups.forEach((g,gi)=>{
     box.insertAdjacentHTML('beforeend', `<div class="mrow" id="mrow${gi}">${mobileHTML(g,gi,0)}</div>`);
   });
@@ -959,6 +977,236 @@ function setView(mob, save){
   if(bd) bd.classList.toggle('on', !mob);
   if(save){ try{ localStorage.setItem('yf_view', mob?'m':'d'); }catch(e){} }
 }
+
+/* ---- 圖片匯出（canvas，純內建、不依賴外部套件）：手機好讀版每檔卡片 / 整頁 一鍵複製圖片・存到相簿 ---- */
+const CV_FONT = '"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+const CV = {
+  ink:'#12233b', sub:'#5b6b82', line:'#e4e9f2', card:'#ffffff', bg:'#f4f6fb', chip:'#eef3fb',
+  brand:'#003580', up:'#d13438', down:'#0a7c4a',
+  kind:{etf:['ETF','#e7f0ff','#1763c6'], fund:['基金','#eafaf1','#0a7c4a'], disc:['全委','#fff1e6','#c25e12']}
+};
+function crRoundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+function crWrapCJK(ctx, text, maxW, font){
+  ctx.font=font;
+  if(ctx.measureText(text).width<=maxW) return [text];
+  let lines=[], cur='';
+  for(const ch of text){
+    const t=cur+ch;
+    if(ctx.measureText(t).width>maxW && cur){ lines.push(cur); cur=ch; }
+    else cur=t;
+  }
+  if(cur) lines.push(cur);
+  return lines.slice(0,2);
+}
+function crPctTxt(v){ return (v===null||v===undefined)?'—':((v>=0?'+':'')+v.toFixed(2)+'%'); }
+
+function crLineChart(ctx, x0, y0, f){
+  const W=340,H=132,padL=6,padR=6,padT=14,padB=18;
+  const s=f.series;
+  if(!s||s.length<2){ crBarChart(ctx,x0,y0,f); return; }
+  const ys=s.map(p=>p[1]); let mn=Math.min(...ys), mx=Math.max(...ys);
+  if(mn===mx){mn-=1;mx+=1;}
+  const pad=(mx-mn)*0.12; mn-=pad; mx+=pad;
+  const n=s.length;
+  const X=i=>x0+padL+(W-padL-padR)*i/(n-1);
+  const Y=v=>y0+padT+(H-padT-padB)*(1-(v-mn)/(mx-mn));
+  const up = s[n-1][1]>=s[0][1];
+  const col = up?CV.up:CV.down;
+  const rgb = up?'209,52,56':'10,124,74';
+  const grad = ctx.createLinearGradient(0,y0+padT,0,y0+H-padB);
+  grad.addColorStop(0, 'rgba('+rgb+',0.16)'); grad.addColorStop(1, 'rgba('+rgb+',0)');
+  ctx.beginPath();
+  s.forEach((p,i)=>{ const x=X(i), y=Y(p[1]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.lineTo(X(n-1), y0+H-padB); ctx.lineTo(X(0), y0+H-padB); ctx.closePath();
+  ctx.fillStyle=grad; ctx.fill();
+  if(f.seriesType==='index' && 100>=mn && 100<=mx){
+    const yb=Y(100);
+    ctx.save(); ctx.strokeStyle='#c7d2e3'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(x0+padL,yb); ctx.lineTo(x0+W-padR,yb); ctx.stroke(); ctx.restore();
+    ctx.fillStyle=CV.sub; ctx.font='10px '+CV_FONT; ctx.textAlign='right'; ctx.textBaseline='alphabetic';
+    ctx.fillText('100', x0+W-padR, yb-3);
+  }
+  ctx.beginPath();
+  s.forEach((p,i)=>{ const x=X(i), y=Y(p[1]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.strokeStyle=col; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+  ctx.fillStyle=CV.sub; ctx.font='10px '+CV_FONT; ctx.textBaseline='alphabetic';
+  ctx.textAlign='left'; ctx.fillText(s[0][0].slice(2), x0+padL, y0+H-5);
+  ctx.textAlign='right'; ctx.fillText(s[n-1][0].slice(2), x0+W-padR, y0+H-5);
+}
+function crBarChart(ctx, x0, y0, f){
+  const r=f.returns||{};
+  const items=[['YTD',r.ytd],['1月',r.m1],['3月',r.m3],['1年',r.y1],['3年',r.y3]];
+  const vals=items.map(x=>x[1]).filter(v=>typeof v==='number');
+  const mx=Math.max(1,...vals.map(Math.abs));
+  const W=340,H=132,padB=18,zeroY=y0+(H-padB)/2+8,half=(H-padB)/2-6;
+  const bw=(W-20)/items.length, gap=10;
+  ctx.strokeStyle=CV.line; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(x0+6,zeroY); ctx.lineTo(x0+W-6,zeroY); ctx.stroke();
+  ctx.textBaseline='alphabetic';
+  items.forEach((it,i)=>{
+    const v=it[1]; const x=x0+10+i*bw;
+    ctx.textAlign='center';
+    if(typeof v==='number'){
+      const h=Math.abs(v)/mx*half;
+      const y=v>=0?zeroY-h:zeroY;
+      const col=v>=0?CV.up:CV.down;
+      crRoundRect(ctx, x+gap/2, y, bw-gap, Math.max(1,h), 3);
+      ctx.fillStyle=col; ctx.fill();
+      ctx.font='bold 10px '+CV_FONT; ctx.fillStyle=col;
+      ctx.fillText((v>=0?'+':'')+v.toFixed(1), x+bw/2, v>=0?y-3:y+h+11);
+    }else{
+      ctx.font='10px '+CV_FONT; ctx.fillStyle=CV.sub;
+      ctx.fillText('—', x+bw/2, zeroY+3);
+    }
+    ctx.font='10px '+CV_FONT; ctx.fillStyle=CV.sub;
+    ctx.fillText(it[0], x+bw/2, y0+H-4);
+  });
+}
+
+const CR_PAD=16, CR_CW=340, CR_CARD_W=CR_CW+CR_PAD*2;
+function crHeaderMetrics(ctx, g, idx){
+  const v=g.variants[idx];
+  const chgtxt=(v.changePct===null||v.changePct===undefined)?'':crPctTxt(v.changePct);
+  const nameFont='bold 15px '+CV_FONT;
+  const nameLines=crWrapCJK(ctx, g.name, 190, nameFont);
+  const nameBlockH = 20 + (nameLines.length-1)*20 + 18;
+  const navBlockH = 24 + 15 + (chgtxt?16:0);
+  return {v, nameLines, chgtxt, headerBlockH: Math.max(nameBlockH, navBlockH, 40)};
+}
+function crCardHeight(ctx, g, idx){
+  const {headerBlockH} = crHeaderMetrics(ctx, g, idx);
+  return CR_PAD + headerBlockH + 10 + 40 + 8 + 14 + 132 + 10 + 16 + CR_PAD;
+}
+function crDrawCard(ctx, x0, y0, g, idx){
+  const k=CV.kind[g.kind];
+  const hm=crHeaderMetrics(ctx, g, idx), v=hm.v;
+  const cardH=crCardHeight(ctx, g, idx);
+  crRoundRect(ctx, x0, y0, CR_CARD_W, cardH, 14);
+  ctx.fillStyle=CV.card; ctx.fill(); ctx.strokeStyle=CV.line; ctx.lineWidth=1; ctx.stroke();
+  let y=y0+CR_PAD;
+  ctx.font='bold 10px '+CV_FONT; ctx.textBaseline='middle';
+  const chipW=ctx.measureText(k[0]).width+14;
+  crRoundRect(ctx, x0+CR_PAD, y, chipW, 16, 8); ctx.fillStyle=k[1]; ctx.fill();
+  ctx.fillStyle=k[2]; ctx.textAlign='center'; ctx.fillText(k[0], x0+CR_PAD+chipW/2, y+8);
+  ctx.font='bold 15px '+CV_FONT; ctx.fillStyle=CV.ink; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText(hm.nameLines[0], x0+CR_PAD+chipW+6, y+12);
+  hm.nameLines.slice(1).forEach((ln,i)=>ctx.fillText(ln, x0+CR_PAD, y+12+(i+1)*20));
+  const nameEndY = y+12+(hm.nameLines.length-1)*20;
+  ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
+  const selLabel=v.label||v.currency||'';
+  ctx.fillText(v.code+(selLabel?' · '+selLabel:'')+(v.navDate?' · '+v.navDate:''), x0+CR_PAD, nameEndY+18);
+  ctx.textAlign='right';
+  ctx.font='bold 22px '+CV_FONT; ctx.fillStyle=CV.ink;
+  ctx.fillText(String(fnav(v)), x0+CR_CARD_W-CR_PAD, y+20);
+  ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
+  ctx.fillText(v.navLabel||'', x0+CR_CARD_W-CR_PAD, y+35);
+  if(hm.chgtxt){
+    ctx.font='bold 12.5px '+CV_FONT; ctx.fillStyle=(v.changePct>=0)?CV.up:CV.down;
+    ctx.fillText(hm.chgtxt, x0+CR_CARD_W-CR_PAD, y+51);
+  }
+  y=y0+CR_PAD+hm.headerBlockH+10;
+  const r=v.returns||{};
+  const rets=[['YTD',r.ytd],['近1月',r.m1],['近3月',r.m3],['近1年',r.y1],['近3年',r.y3]];
+  const bw=(CR_CW-16)/5, gap=4;
+  rets.forEach((it,i)=>{
+    const bx=x0+CR_PAD+i*bw;
+    crRoundRect(ctx, bx+gap/2, y, bw-gap, 40, 8); ctx.fillStyle='#f7f9fd'; ctx.fill();
+    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.font='9.5px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.fillText(it[0], bx+bw/2, y+15);
+    ctx.font='bold 12.5px '+CV_FONT;
+    ctx.fillStyle=(it[1]===null||it[1]===undefined)?'#a9b4c4':(it[1]>=0?CV.up:CV.down);
+    ctx.fillText(crPctTxt(it[1]), bx+bw/2, y+31);
+  });
+  y+=40+8;
+  ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.textAlign='left';
+  ctx.fillText(v.seriesLabel||'', x0+CR_PAD, y+11);
+  y+=14;
+  crLineChart(ctx, x0+CR_PAD, y, v);
+  y+=132+10;
+  ctx.font='10.5px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('資料更新：'+(DATA.updated||'')+'（台北）· 元大基金淨值與表現', x0+CR_PAD, y+11);
+  return cardH;
+}
+function crMakeCanvas(w,h,scale){
+  const c=document.createElement('canvas');
+  c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+  const ctx=c.getContext('2d'); ctx.scale(scale,scale);
+  return {c, ctx};
+}
+function renderCardCanvas(gi, idx){
+  const g=DATA.groups[gi];
+  const probe=document.createElement('canvas').getContext('2d');
+  const cardH=crCardHeight(probe, g, idx);
+  const {c, ctx}=crMakeCanvas(CR_CARD_W, cardH, 2.5);
+  ctx.fillStyle=CV.bg; ctx.fillRect(0,0,CR_CARD_W,cardH);
+  crDrawCard(ctx, 0, 0, g, idx);
+  return c;
+}
+function renderFullPageCanvas(){
+  const probe=document.createElement('canvas').getContext('2d');
+  const titleH=64, gap=12, outer=14;
+  let totalH=titleH;
+  const heights=DATA.groups.map((g,gi)=>crCardHeight(probe, g, mobSel[gi]||0));
+  totalH += heights.reduce((a,b)=>a+b+gap,0) + 40;
+  const W=CR_CARD_W+outer*2;
+  const {c, ctx}=crMakeCanvas(W, totalH+outer, 2.5);
+  ctx.fillStyle=CV.bg; ctx.fillRect(0,0,W,totalH+outer);
+  ctx.fillStyle=CV.brand; ctx.font='bold 20px '+CV_FONT; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('元大基金淨值與表現', outer, outer+22);
+  ctx.font='12px '+CV_FONT; ctx.fillStyle=CV.sub;
+  ctx.fillText('資料更新：'+(DATA.updated||'')+'（台北）· 紅漲綠跌', outer, outer+42);
+  let y=outer+titleH;
+  DATA.groups.forEach((g,gi)=>{
+    crDrawCard(ctx, outer, y, g, mobSel[gi]||0);
+    y+=heights[gi]+gap;
+  });
+  ctx.font='10.5px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('僅供參考，非投資建議；實際淨值以各機構公告為準。', outer, y+14);
+  return c;
+}
+function btnFlash(btn, label, isErr){
+  const o=btn.innerHTML; btn.textContent=label; btn.classList.add(isErr?'err':'ok');
+  setTimeout(()=>{ btn.innerHTML=o; btn.classList.remove('ok','err'); }, isErr?2200:1600);
+}
+function crFileName(prefix){
+  const d=(DATA.updated||'').slice(0,10).replace(/-/g,'');
+  return prefix+'_'+d+'.png';
+}
+function crSave(canvas, fname, btn){
+  canvas.toBlob(blob=>{
+    if(!blob){ btnFlash(btn,'⚠ 產生圖片失敗', true); return; }
+    const file=new File([blob], fname, {type:'image/png'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:fname}).then(()=>btnFlash(btn,'✓ 已開啟分享')).catch(()=>{});
+    }else{
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=fname;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      btnFlash(btn,'✓ 已產生圖片，請儲存');
+    }
+  }, 'image/png');
+}
+function crCopy(canvas, btn){
+  try{
+    const blobPromise=new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('no blob')), 'image/png'));
+    navigator.clipboard.write([new ClipboardItem({'image/png': blobPromise})])
+      .then(()=>btnFlash(btn,'✓ 已複製圖片'))
+      .catch(()=>btnFlash(btn,'⚠ 此瀏覽器不支援複製，改用存檔', true));
+  }catch(e){ btnFlash(btn,'⚠ 此瀏覽器不支援複製，改用存檔', true); }
+}
+function saveCardImage(gi, idx, btn){ crSave(renderCardCanvas(gi, idx), crFileName(DATA.groups[gi].name), btn); }
+function copyCardImage(gi, idx, btn){ crCopy(renderCardCanvas(gi, idx), btn); }
+function saveAllImage(btn){ crSave(renderFullPageCanvas(), crFileName('元大基金淨值與表現'), btn); }
+function copyAllImage(btn){ crCopy(renderFullPageCanvas(), btn); }
 
 overview();cards();mobile();
 (function(){
