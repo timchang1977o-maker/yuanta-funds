@@ -484,7 +484,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   --chip:#eef3fb; --shadow:0 1px 3px rgba(16,38,72,.08),0 8px 24px rgba(16,38,72,.06);
 }
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);
+html,body{margin:0;background:var(--bg);color:var(--ink);overflow-x:hidden;max-width:100%;
   font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,sans-serif;
   -webkit-font-smoothing:antialiased}
 .wrap{max-width:1160px;margin:0 auto;padding:28px 20px 60px}
@@ -517,7 +517,7 @@ tbody tr:hover td:first-child{background:#fafcff}
 /* 卡片區 */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 16px 12px;display:flex;flex-direction:column}
-.card .ctop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.card .ctop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
 .card .ctop>div:first-child{min-width:0}
 .card h3{margin:0;font-size:16px;line-height:1.35}
 .card .code{font-size:12px;color:var(--sub);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -525,12 +525,14 @@ tbody tr:hover td:first-child{background:#fafcff}
   appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23003580' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 7px center}
 .vsel:hover{border-color:var(--brand2)}
 .vsel-sm{font-size:11.5px;padding:1px 20px 1px 7px;background-position:right 6px center;font-weight:600}
-.card .navnow{text-align:right;flex-shrink:0}
+.curbadge{display:inline-block;font-family:inherit;font-size:12px;font-weight:800;color:var(--brand);background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:3px 8px}
+.curbadge-sm{font-size:11.5px;padding:1px 7px;font-weight:700}
+.card .navnow{text-align:right;flex-shrink:0;margin-left:auto}
 .card .navnow .v{font-size:22px;font-weight:800;line-height:1}
 .card .navnow .d{font-size:11px;color:var(--sub);margin-top:3px;white-space:nowrap}
 .card .navnow .chg{font-size:12.5px;font-weight:700;margin-top:3px}
 .retrow{display:flex;gap:6px;margin:12px 0 6px;flex-wrap:wrap}
-.ret{flex:1;min-width:52px;background:#f7f9fd;border:1px solid var(--line);border-radius:9px;padding:7px 6px;text-align:center;cursor:pointer;transition:background .12s,border-color .12s;font-family:inherit}
+.ret{flex:1;min-width:0;flex-basis:52px;background:#f7f9fd;border:1px solid var(--line);border-radius:9px;padding:7px 4px;text-align:center;cursor:pointer;transition:background .12s,border-color .12s;font-family:inherit}
 .ret:hover{background:#eef2f9}
 .ret.active{background:var(--brand);border-color:var(--brand)}
 .ret.active .l,.ret.active .n{color:#fff}
@@ -557,15 +559,15 @@ body.mob .legend{display:none}
 body.mob footer{display:none}
 .mnote{font-size:11.5px;color:var(--sub);text-align:center;line-height:1.6;margin:16px 4px 0}
 .mrow{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px 15px;margin-bottom:11px}
-.mrow .mtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.mrow .mtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .mrow .mname{font-size:16px;font-weight:800;line-height:1.32}
 .mrow .msub{font-size:12px;color:var(--sub);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.mrow .mnav{text-align:right;flex-shrink:0}
+.mrow .mnav{text-align:right;flex-shrink:0;margin-left:auto}
 .mrow .mnav .v{font-size:27px;font-weight:800;line-height:1}
 .mrow .mnav .u{font-size:11px;color:var(--sub);margin-top:3px;white-space:nowrap}
 .mrow .mnav .c{font-size:13px;font-weight:800;margin-top:4px}
-.mrets{display:flex;gap:4px;margin-top:11px}
-.mrets .mr{flex:1;min-width:0;text-align:center;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:5px 2px}
+.mrets{display:flex;gap:4px;margin-top:11px;flex-wrap:wrap}
+.mrets .mr{flex:1;min-width:56px;text-align:center;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:5px 2px}
 .mrets .mr .l{font-size:9.5px;color:var(--sub)}
 .mrets .mr .n{font-size:12.5px;font-weight:800;margin-top:2px}
 .mchart{margin-top:10px}
@@ -576,7 +578,7 @@ body.mob footer{display:none}
 .imgbtn.ok{background:var(--accent);color:#fff;border-color:var(--accent)}
 .imgbtn.err{background:#fdeceb;color:#c0392b;border-color:#f3c9c5}
 .imgbar{display:flex;gap:10px;margin-bottom:14px}
-.imgbar .copybtn{margin-bottom:0}
+.imgbar .copybtn{margin-bottom:0;width:auto;flex:1;min-width:0}
 .copybtn{display:block;width:100%;font-family:inherit;font-size:15px;font-weight:800;color:#fff;background:var(--brand);border:none;border-radius:12px;padding:13px;margin-bottom:14px;cursor:pointer;box-shadow:var(--shadow);transition:background .12s,transform .05s}
 .copybtn:hover{background:var(--brand2)}
 .copybtn:active{transform:scale(.99)}
@@ -784,7 +786,7 @@ function cardHTML(g, gi, idx){
   const sel = g.variants.length>1
     ? `<select class="vsel" aria-label="切換幣別/級別" onchange="switchVar(${gi}, this.selectedIndex)">`+
       g.variants.map((x,i)=>`<option ${i===idx?'selected':''}>${x.label}</option>`).join('')+`</select>`
-    : `<span>${v.currency||v.label||''}</span>`;
+    : `<span class="curbadge">${v.currency||v.label||''}</span>`;
   const chgtxt=(v.change!==null&&v.change!==undefined?((v.change>=0?'+':'')+v.change+' '):'')+
     ((v.changePct===null||v.changePct===undefined)?'':((v.changePct>=0?'+':'')+v.changePct+'%'));
   const chgcls=(v.changePct>=0)?'pos':'neg';
@@ -822,7 +824,7 @@ function mobileHTML(g, gi, idx){
   const sel = g.variants.length>1
     ? `<select class="vsel vsel-sm" aria-label="切換幣別/級別" onchange="switchMob(${gi}, this.selectedIndex)">`+
       g.variants.map((x,i)=>`<option ${i===idx?'selected':''}>${x.label}</option>`).join('')+`</select>`
-    : `<span>${v.currency||v.label||''}</span>`;
+    : `<span class="curbadge curbadge-sm">${v.currency||v.label||''}</span>`;
   const chgtxt=(v.change!==null&&v.change!==undefined?((v.change>=0?'+':'')+v.change+' '):'')+
     ((v.changePct===null||v.changePct===undefined)?'':((v.changePct>=0?'+':'')+v.changePct+'%'));
   const chgcls=(v.changePct>=0)?'pos':'neg';
@@ -1009,6 +1011,12 @@ function crWrapCJK(ctx, text, maxW, font){
   return lines.slice(0,2);
 }
 function crPctTxt(v){ return (v===null||v===undefined)?'—':((v>=0?'+':'')+v.toFixed(2)+'%'); }
+function crFitFont(ctx, text, maxW, px, weight){
+  let f=px;
+  ctx.font=(weight?weight+' ':'')+f+'px '+CV_FONT;
+  while(f>8 && ctx.measureText(text).width>maxW){ f-=0.5; ctx.font=(weight?weight+' ':'')+f+'px '+CV_FONT; }
+  return f;
+}
 
 function crLineChart(ctx, x0, y0, f){
   const W=340,H=132,padL=6,padR=6,padT=14,padB=18;
@@ -1102,9 +1110,23 @@ function crDrawCard(ctx, x0, y0, g, idx){
   ctx.fillText(hm.nameLines[0], x0+CR_PAD+chipW+6, y+12);
   hm.nameLines.slice(1).forEach((ln,i)=>ctx.fillText(ln, x0+CR_PAD, y+12+(i+1)*20));
   const nameEndY = y+12+(hm.nameLines.length-1)*20;
-  ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
   const selLabel=v.label||v.currency||'';
-  ctx.fillText(v.code+(selLabel?' · '+selLabel:'')+(v.navDate?' · '+v.navDate:''), x0+CR_PAD, nameEndY+18);
+  {
+    const yln=nameEndY+18; let cx=x0+CR_PAD;
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
+    ctx.fillText(v.code, cx, yln); cx+=ctx.measureText(v.code).width;
+    if(selLabel){
+      ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
+      ctx.fillText(' · ', cx, yln); cx+=ctx.measureText(' · ').width;
+      ctx.font='bold 12px '+CV_FONT; ctx.fillStyle=CV.brand;
+      ctx.fillText(selLabel, cx, yln); cx+=ctx.measureText(selLabel).width;
+    }
+    if(v.navDate){
+      ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub;
+      ctx.fillText(' · '+v.navDate, cx, yln);
+    }
+  }
   ctx.textAlign='right';
   ctx.font='bold 22px '+CV_FONT; ctx.fillStyle=CV.ink;
   ctx.fillText(String(fnav(v)), x0+CR_CARD_W-CR_PAD, y+20);
@@ -1123,9 +1145,10 @@ function crDrawCard(ctx, x0, y0, g, idx){
     crRoundRect(ctx, bx+gap/2, y, bw-gap, 40, 8); ctx.fillStyle='#f7f9fd'; ctx.fill();
     ctx.textAlign='center'; ctx.textBaseline='alphabetic';
     ctx.font='9.5px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.fillText(it[0], bx+bw/2, y+15);
-    ctx.font='bold 12.5px '+CV_FONT;
+    const pctTxt=crPctTxt(it[1]);
+    crFitFont(ctx, pctTxt, bw-gap-6, 12.5, 'bold');
     ctx.fillStyle=(it[1]===null||it[1]===undefined)?'#a9b4c4':(it[1]>=0?CV.up:CV.down);
-    ctx.fillText(crPctTxt(it[1]), bx+bw/2, y+31);
+    ctx.fillText(pctTxt, bx+bw/2, y+31);
   });
   y+=40+8;
   ctx.font='11px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.textAlign='left';
