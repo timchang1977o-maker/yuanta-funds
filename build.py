@@ -926,8 +926,10 @@ function copyPanelHTML(){
     });
     h+='</div></div>';
   });
-  h+='<button class="copybtn" onclick="copySelected(this)">📋 複製所選（<span id="cpcount">'+
+  h+='<button class="copybtn" onclick="copySelected(this)">📋 複製所選文字（<span id="cpcount">'+
      copySel.size+'</span> 項）</button>';
+  h+='<div class="imgbar"><button class="imgbtn" onclick="saveSelectedImage(this)">📤 存所選圖片</button>'+
+     '<button class="imgbtn" onclick="copySelectedImage(this)">📋 複製所選圖片</button></div>';
   return h;
 }
 function toggleCopyPanel(btn){
@@ -1150,27 +1152,37 @@ function renderCardCanvas(gi, idx){
   crDrawCard(ctx, 0, 0, g, idx);
   return c;
 }
-function renderFullPageCanvas(){
+/* items = [[g, idx], ...]，idx 為該 group 要畫的 variant index */
+function renderImagesCanvas(items, titleSuffix){
   const probe=document.createElement('canvas').getContext('2d');
   const titleH=64, gap=12, outer=14;
-  let totalH=titleH;
-  const heights=DATA.groups.map((g,gi)=>crCardHeight(probe, g, mobSel[gi]||0));
-  totalH += heights.reduce((a,b)=>a+b+gap,0) + 40;
+  const heights=items.map(([g,idx])=>crCardHeight(probe, g, idx));
+  let totalH=titleH + heights.reduce((a,b)=>a+b+gap,0) + 40;
   const W=CR_CARD_W+outer*2;
   const {c, ctx}=crMakeCanvas(W, totalH+outer, 2.5);
   ctx.fillStyle=CV.bg; ctx.fillRect(0,0,W,totalH+outer);
   ctx.fillStyle=CV.brand; ctx.font='bold 20px '+CV_FONT; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-  ctx.fillText('元大基金淨值與表現', outer, outer+22);
+  ctx.fillText('元大基金淨值與表現'+(titleSuffix||''), outer, outer+22);
   ctx.font='12px '+CV_FONT; ctx.fillStyle=CV.sub;
   ctx.fillText('資料更新：'+(DATA.updated||'')+'（台北）· 紅漲綠跌', outer, outer+42);
   let y=outer+titleH;
-  DATA.groups.forEach((g,gi)=>{
-    crDrawCard(ctx, outer, y, g, mobSel[gi]||0);
-    y+=heights[gi]+gap;
+  items.forEach(([g,idx],i)=>{
+    crDrawCard(ctx, outer, y, g, idx);
+    y+=heights[i]+gap;
   });
   ctx.font='10.5px '+CV_FONT; ctx.fillStyle=CV.sub; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.fillText('僅供參考，非投資建議；實際淨值以各機構公告為準。', outer, y+14);
   return c;
+}
+function renderFullPageCanvas(){
+  return renderImagesCanvas(DATA.groups.map((g,gi)=>[g, mobSel[gi]||0]));
+}
+function selectedImageItems(){
+  const items=[];
+  DATA.groups.forEach((g,gi)=>g.variants.forEach((v,vi)=>{
+    if(copySel && copySel.has(gi+':'+vi)) items.push([g,vi]);
+  }));
+  return items;
 }
 function btnFlash(btn, label, isErr){
   const o=btn.innerHTML; btn.textContent=label; btn.classList.add(isErr?'err':'ok');
@@ -1207,6 +1219,14 @@ function saveCardImage(gi, idx, btn){ crSave(renderCardCanvas(gi, idx), crFileNa
 function copyCardImage(gi, idx, btn){ crCopy(renderCardCanvas(gi, idx), btn); }
 function saveAllImage(btn){ crSave(renderFullPageCanvas(), crFileName('元大基金淨值與表現'), btn); }
 function copyAllImage(btn){ crCopy(renderFullPageCanvas(), btn); }
+function saveSelectedImage(btn){
+  if(!copySel||!copySel.size){ btnFlash(btn,'⚠ 尚未勾選項目', true); return; }
+  crSave(renderImagesCanvas(selectedImageItems(),'（自選）'), crFileName('元大基金淨值與表現_自選'), btn);
+}
+function copySelectedImage(btn){
+  if(!copySel||!copySel.size){ btnFlash(btn,'⚠ 尚未勾選項目', true); return; }
+  crCopy(renderImagesCanvas(selectedImageItems(),'（自選）'), btn);
+}
 
 overview();cards();mobile();
 (function(){
