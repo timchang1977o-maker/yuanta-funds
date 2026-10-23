@@ -384,180 +384,6 @@ def build_data():
     return groups
 
 
-# ---------- 台股基金比較（多多 vs 經貿 vs 台優龍） ----------
-# 三檔皆為元大投信國內股票型、新台幣A類型不配息（台優龍以A不配息級別比，看含息總報酬）。
-# 資料源：元大投信官方 FundNAV 端點（成立以來逐日淨值，不需 handshake）＋ FundList（規模／成立日／風險等級／
-# 最低申購／理柏官方月底報酬）。期間報酬、年化波動、最大回撤皆由逐日淨值自算，公式見 _compare_metrics()。
-COMPARE_FUNDS = [
-    {'code': 'A05004', 'yid': '1003', 'short': '多多', 'name': '元大多多基金', 'cls': '新台幣A類型', 'color': '#003580'},
-    {'code': 'A05013', 'yid': '1009', 'short': '經貿', 'name': '元大經貿基金', 'cls': '新台幣A類型', 'color': '#c25e12'},
-    {'code': 'A3PCXt7', 'yid': '1202', 'short': '台優龍', 'name': '元大台灣高股息優質龍頭基金', 'cls': '新台幣A類型不配息', 'color': '#0a7c4a'},
-    # 對照標的（2026-10-23 加）：FinMind 市價 ＋ 除息／分割還原成含息總報酬序列，與不配息基金同口徑
-    {'code': '0050', 'kind': 'stock', 'yid': '1066', 'short': '0050', 'name': '元大台灣50 ETF', 'cls': '市價（除息／分割還原）', 'color': '#6f42c1',
-     'inception': '2003-06-25', 'risk': 'RR4', 'payout': '半年配息'},
-    {'code': '2330', 'kind': 'stock', 'yid': None, 'short': '台積電', 'name': '台積電 2330', 'cls': '股價（除息還原）', 'color': '#b8860b',
-     'inception': '1994-09-05', 'risk': '個股', 'payout': '季配息'},
-]
-COMPARE_COMMON_START = '2020-03-23'   # 台優龍成立日＝三檔共同起點
-
-def _yuanta_series(fund_id):
-    """元大投信官方 FundNAV 逐日淨值（成立以來），回傳升冪 [(date_iso, nav)]。"""
-    url = (f'{YUANTA_NAV_API}?APIType=EC2API&AppName=FundWeb&PageName=%2F&Device=4'
-           f'&DeviceId=00000000-0000-0000-0000-000000000000&FuncId=FundNAV&FundId={fund_id}')
-    data = getj(url, headers={'Referer': f'https://www.yuantafunds.com/myfund/information/{fund_id}'})
-    out = []
-    for n in (data.get('Data') or {}).get('NAV') or []:
-        d = str(n.get('NAV_DATE') or '')
-        v = n.get('NAV_B')
-        if len(d) == 8 and isinstance(v, (int, float)) and v > 0:
-            out.append((f'{d[:4]}-{d[4:6]}-{d[6:]}', float(v)))
-    out.sort()
-    return out
-
-def _finmind_rows(dataset, stock_id, start):
-    url = (f'https://api.finmindtrade.com/api/v4/data?dataset={dataset}&data_id={stock_id}&start_date={start}')
-    return getj(url).get('data', [])
-
-def _finmind_tr_series(stock_id, start='2019-01-01'):
-    """回傳 (raw, tr)：raw＝升冪 [(date, close)] 市價；tr＝除息／分割還原後的含息總報酬序列，
-    尾端對齊最新市價（TR_t = TR_{t-1} × (P_t × split_t + D_t) / P_{t-1}，D_t＝除息日現金股利，
-    split_t＝分割比例；最後整條乘上常數使末筆＝最新收盤）。"""
-    rows = [r for r in _finmind_rows('TaiwanStockPrice', stock_id, start) if r.get('close')]
-    rows.sort(key=lambda r: r['date'])
-    raw = [(r['date'], float(r['close'])) for r in rows]
-    if len(raw) < 30:
-        raise RuntimeError(f'{stock_id} FinMind 市價序列過短 ({len(raw)})')
-    div = {}
-    for r in _finmind_rows('TaiwanStockDividendResult', stock_id, start):
-        d = r.get('stock_and_cache_dividend')
-        if r.get('date') and isinstance(d, (int, float)) and d > 0:
-            div[r['date']] = div.get(r['date'], 0.0) + float(d)
-    split = {}
-    for r in _finmind_rows('TaiwanStockSplitPrice', stock_id, start):
-        b, a = r.get('before_price'), r.get('after_price')
-        if r.get('date') and b and a:
-            split[r['date']] = float(b) / float(a)   # 例 0050 2025-06-18：188.65/47.16 ≈ 4
-    tr = [raw[0][1]]
-    for i in range(1, len(raw)):
-        d, p = raw[i]
-        prev = raw[i - 1][1]
-        factor = split.get(d, 1.0)
-        # 分割只在分割當天乘 factor（之後的 P_t/P_{t-1} 已同為新基準）
-        tr.append(tr[-1] * (p * factor + div.get(d, 0.0)) / prev if prev else tr[-1])
-    k = raw[-1][1] / tr[-1]
-    tr = [(raw[i][0], round(v * k, 4)) for i, v in enumerate(tr)]
-    return raw, tr
-
-def _yuanta_fund_list():
-    url = (f'{YUANTA_NAV_API}?APIType=EC2API&AppName=FundWeb&PageName=%2F&Device=4'
-           f'&DeviceId=00000000-0000-0000-0000-000000000000&FuncId=FundList')
-    data = getj(url, headers={'Referer': 'https://www.yuantafunds.com/'})
-    return {str(f.get('FUND_ID')): f for f in (data.get('Data') or {}).get('FUND') or []}
-
-def _compare_metrics(series):
-    """series 升冪 [(date_iso, nav)]。
-    期間報酬 = 最新淨值 / 期初淨值 − 1（期初取「<= 目標日」最近一筆；YTD 取去年最後一筆）。
-    年化波動（近1年）= 日對數報酬標準差 × √252。
-    最大回撤 = 區間內 (淨值 / 累計最高淨值 − 1) 的最小值。"""
-    import math
-    dates = [datetime.date.fromisoformat(d) for d, _ in series]
-    vals = [v for _, v in series]
-    last_d, last_v = dates[-1], vals[-1]
-    rets = horizon_returns(dates, vals)            # ytd/m1/m3/y1/y3
-    for key, days in [('m6', 182), ('y5', 365 * 5)]:
-        tgt = last_d - datetime.timedelta(days=days)
-        idx = nearest_on_or_before(dates, tgt) if tgt >= dates[0] else None
-        rets[key] = pct(last_v, vals[idx]) if idx is not None else None
-    cs = datetime.date.fromisoformat(COMPARE_COMMON_START)
-    idx = nearest_on_or_before(dates, cs - datetime.timedelta(days=1))
-    # 共同起點：台優龍成立日當天淨值 10 為基準；其他兩檔取成立日前一交易日淨值
-    base_idx = idx if idx is not None else (0 if dates[0] >= cs else None)
-    rets['common'] = pct(last_v, vals[base_idx]) if base_idx is not None else None
-
-    def window(days):
-        tgt = last_d - datetime.timedelta(days=days)
-        i = nearest_on_or_before(dates, tgt)
-        return vals[i:] if i is not None else vals
-    def mdd(w):
-        peak, worst = w[0], 0.0
-        for v in w:
-            peak = max(peak, v)
-            worst = min(worst, v / peak - 1)
-        return round(worst * 100, 2)
-    w1 = window(365); w3 = window(365 * 3)
-    lr = [math.log(w1[i] / w1[i - 1]) for i in range(1, len(w1)) if w1[i - 1] > 0]
-    vol = None
-    if len(lr) > 20:
-        m = sum(lr) / len(lr)
-        vol = round(math.sqrt(sum((x - m) ** 2 for x in lr) / (len(lr) - 1)) * math.sqrt(252) * 100, 2)
-    return {
-        'returns': rets,
-        'vol1y': vol,
-        'mdd1y': mdd(w1), 'mdd3y': mdd(w3),
-        'hi1y': max(w1), 'lo1y': min(w1),
-        'hi1yDate': series[len(series) - len(w1):][w1.index(max(w1))][0],
-        'lo1yDate': series[len(series) - len(w1):][w1.index(min(w1))][0],
-    }
-
-def build_compare():
-    fl = {}
-    try:
-        fl = _yuanta_fund_list()
-    except Exception as e:
-        print(f'[compare] FundList 失敗（基本資料欄位留空）：{e}', file=sys.stderr)
-    funds = []
-    for cf in COMPARE_FUNDS:
-        price_rets = None
-        if cf.get('kind') == 'stock':
-            raw, series = _finmind_tr_series(cf['code'])
-            pr = horizon_returns([datetime.date.fromisoformat(d) for d, _ in raw], [v for _, v in raw])
-            price_rets = {'ytd': pr.get('ytd'), 'y1': pr.get('y1')}
-        else:
-            series = _yuanta_series(cf['yid'])
-        if len(series) < 30:
-            raise RuntimeError(f'{cf["name"]} 序列過短 ({len(series)})')
-        m = _compare_metrics(series)
-        info = fl.get(cf['yid']) or {} if cf.get('yid') else {}
-        def _n(x):
-            return round(float(x), 2) if isinstance(x, (int, float)) else None
-        setup = str(info.get('FUND_SETUP_DATE') or '')
-        sz_d = str(info.get('FUND_SIZE_DATE') or '')
-        is_stock = cf.get('kind') == 'stock'
-        last_nav = raw[-1][1] if is_stock else series[-1][1]
-        prev_nav = raw[-2][1] if is_stock else series[-2][1]
-        funds.append({
-            **{k: cf[k] for k in ('code', 'short', 'name', 'cls', 'color')},
-            'kind': 'stock' if is_stock else 'fund',
-            'navLabel': '市價' if is_stock else '淨值',
-            'nav': last_nav, 'navDate': series[-1][0],
-            'change': round(last_nav - prev_nav, 2),
-            'changePct': pct(last_nav, prev_nav),
-            'priceReturns': price_rets,
-            'inception': cf.get('inception') or (f'{setup[:4]}-{setup[4:6]}-{setup[6:]}' if len(setup) == 8 else series[0][0]),
-            'sizeNtd': _n(info.get('FUND_SIZE')),
-            'sizeDate': f'{sz_d[:4]}-{sz_d[4:6]}-{sz_d[6:]}' if len(sz_d) == 8 else None,
-            'risk': cf.get('risk') or info.get('RISK_CLASS'),
-            'payout': cf.get('payout') or info.get('CYCLE_TYPE') or '不配息',
-            'minBuy': None if is_stock else _n(info.get('EC_ALLOT_MIN_AMT')),
-            'minRsp': None if is_stock else _n(info.get('RSP_ALLOT_MIN_AMT')),
-            'lipper': {
-                'asOf': info.get('DATEYM'),
-                'm3': _n(info.get('M3_RATE')), 'm6': _n(info.get('M6_RATE')), 'ytd': _n(info.get('Y_RATE')),
-                'y1': _n(info.get('Y1_RATE')), 'y2': _n(info.get('Y2_RATE')), 'y3': _n(info.get('Y3_RATE')),
-                'y5': _n(info.get('Y5_RATE')), 'incept': _n(info.get('RATE')),
-            },
-            **m,
-            # 走勢只帶共同起點以後（成立以來全序列太大）；5年／3年報酬已在上面用全序列算好
-            'series': [[d, round(v, 2)] for d, v in series if d >= COMPARE_COMMON_START],
-        })
-        print(f'[compare] {cf["name"]}: nav={series[-1][1]} ({series[-1][0]}) pts={len(series)} YTD={m["returns"].get("ytd")} 1Y={m["returns"].get("y1")}')
-        time.sleep(0.8)
-    return {
-        'commonStart': COMPARE_COMMON_START,
-        'source': '基金＝元大投信官方 FundNAV 逐日淨值；0050／台積電＝FinMind（TWSE 市價）以除息、分割還原成含息總報酬序列；期間報酬／年化波動／最大回撤皆自算；規模、成立日、風險等級、理柏月底報酬取自元大投信 FundList',
-        'funds': funds,
-    }
-
 # ---------- 永不倒退高水位保護 ----------
 # 背景：鉅亨基金 API（fund.api.cnyes.com）對 GitHub 美國 runner 的 IP 會慢約一天
 # （origin 分區資料落後，實測 2026-08 確認；cache 招式無效）。若每次都用抓到的值直接覆蓋，
@@ -629,24 +455,10 @@ def main():
     # 保留 GROUPS 定義的組別順序
     gorder = [g['name'] for g in GROUPS]
     groups.sort(key=lambda g: gorder.index(g['name']) if g['name'] in gorder else 99)
-    compare = None
-    try:
-        compare = build_compare()
-    except Exception as e:
-        print(f'[compare] 本次比較表抓取失敗，沿用上一版：{e}', file=sys.stderr)
-    if not compare:
-        for src_url in (PAGES_DATA_URL, None):
-            try:
-                prev = getj(src_url, tries=2) if src_url else json.load(open(os.path.join(here, 'data.json'), encoding='utf-8'))
-                if prev.get('compare'):
-                    compare = prev['compare']; break
-            except Exception:
-                pass
     payload = {
         'updated': datetime.datetime.now(TPE).strftime('%Y-%m-%d %H:%M'),
         'dataAsOf': max((v.get('navDate') or '' for g in groups for v in g['variants']), default=''),
         'groups': groups,
-        'compare': compare,
     }
     with open(os.path.join(here, 'data.json'), 'w', encoding='utf-8') as fp:
         json.dump(payload, fp, ensure_ascii=False, indent=1)
@@ -796,42 +608,6 @@ body.mob footer{display:none}
 .cprow.on{color:var(--brand);border-color:var(--brand);background:#f2f6fd}
 .cprow input{margin:0;width:17px;height:17px;accent-color:var(--brand);cursor:pointer;flex:none}
 
-/* 台股基金比較區 */
-.cmp .hd .hdsub{font-size:12px;font-weight:500;color:var(--sub);margin-left:4px}
-.cmpwrap{display:block}
-.cmpchart{padding:14px 16px 10px;border-bottom:1px solid var(--line);min-width:0}
-.cmpctl{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
-.cmpctl .lbl{font-size:12px;color:var(--sub);margin-right:2px}
-.rbtn{font-family:inherit;font-size:12px;font-weight:700;color:var(--sub);background:#f7f9fd;border:1px solid var(--line);border-radius:999px;padding:4px 11px;cursor:pointer;transition:background .12s,color .12s}
-.rbtn:hover{background:#eef2f9}
-.rbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
-.cmplegend{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px}
-.cmplegend .lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;background:#f7f9fd;border:1px solid var(--line);border-radius:8px;padding:4px 9px}
-.cmplegend .lg i{display:inline-block;width:12px;height:3px;border-radius:2px}
-.cmplegend .lg small{font-weight:800}
-.cmpchart .chartbox svg{height:300px}
-.cmpt th,.cmpt td{padding:8px 12px}
-.cmpt td:first-child,.cmpt th:first-child{color:var(--sub);font-weight:600;font-size:12.5px;white-space:normal;min-width:118px}
-.cmpt th.fh{text-align:right;color:var(--ink);font-size:13px;font-weight:800}
-.cmpt th.fh small{display:block;font-weight:500;color:var(--sub);font-size:11px;margin-top:1px}
-.cmpt th.fh i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
-.cmpt tr.sec td{background:#f7f9fd;color:var(--brand);font-weight:800;font-size:12px;padding:6px 12px;text-align:left}
-.cmpt td.best{font-weight:800;position:relative}
-.cmpt td.best::after{content:"★";font-size:9px;color:#d9a300;margin-left:3px;vertical-align:top}
-.cmpt td.big{font-weight:800;font-size:15px;color:var(--ink)}
-.cmpt td small{color:var(--sub);font-size:11px;font-weight:500}
-@media(max-width:860px){.cmpchart .chartbox svg{height:220px}}
-/* 手機好讀版比較區 */
-.mcmp{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px 15px;margin:4px 0 11px}
-.mcmp .mname{font-size:15px;font-weight:800;margin-bottom:2px}
-.mcmp .msub{font-size:11.5px;color:var(--sub);margin-bottom:8px}
-.mcmp .chartbox svg{height:170px}
-.mcmp table{font-size:11.5px;margin-top:8px}
-.mcmp th,.mcmp td{padding:6px 3px}
-.mcmp td:first-child,.mcmp th:first-child{color:var(--sub);font-weight:600;font-size:11.5px;min-width:0}
-.mcmp th.fh{font-size:12px;font-weight:800;color:var(--ink)}
-.mcmp th.fh i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:middle}
-.mcmp td.big{font-weight:800}
 </style>
 </head>
 <body>
@@ -869,8 +645,6 @@ body.mob footer{display:none}
     <div class="tblnote">※ 報酬率：ETF 為市價報酬（<b>不含息</b>）、全委為含撥回報酬、基金為晨星官方各期報酬。「—」＝該標的成立未滿該期間或資料源未提供。</div>
   </div>
 
-  <div class="tablecard cmp" id="cmpcard"></div>
-
   <div class="grid" id="cards"></div>
   </div><!-- /deskview -->
 
@@ -878,7 +652,7 @@ body.mob footer{display:none}
 
   <footer>
     <b>資料來源</b>：ETF（00990A）＝FinMind／TWSE 日線（市價收盤、<b>不含息</b>之市價報酬）；共同基金＝鉅亨 fund.api（晨星官方歷史走勢/各期報酬），最新一筆淨值以元大投信官方 FundNAV／SITCA 投信投顧公會／fundclear 基金資訊觀測站三個官方源依序校正（避免 cnyes 資料落後）；全委帳戶＝鉅亨 co.cnyes 元大人壽全委 API（官方含撥回報酬與報酬指數）。<br>
-    <b>說明</b>：有多幣別／配息級別的標的，於卡片右上下拉切換（總覽表顯示預設級別）。全委帳戶（元元致富·財富雙利/雙享）為投資型保單之類全權委託帳戶，走勢圖為「含撥回報酬指數（基準 100）」而非單位淨值曲線；「近1年/近3年」在成立未滿期間顯示「—」。「台股基金比較」區塊三檔均採元大投信官方 FundNAV 成立以來逐日淨值自算累積報酬、年化波動與最大回撤，基本資料與理柏月底報酬取自元大投信官網 FundList。本頁僅供參考，非投資建議；實際淨值以各機構公告為準。
+    <b>說明</b>：有多幣別／配息級別的標的，於卡片右上下拉切換（總覽表顯示預設級別）。全委帳戶（元元致富·財富雙利/雙享）為投資型保單之類全權委託帳戶，走勢圖為「含撥回報酬指數（基準 100）」而非單位淨值曲線；「近1年/近3年」在成立未滿期間顯示「—」。本頁僅供參考，非投資建議；實際淨值以各機構公告為準。
   </footer>
 </div>
 
@@ -1095,186 +869,10 @@ function mobile(){
   DATA.groups.forEach((g,gi)=>{
     box.insertAdjacentHTML('beforeend', `<div class="mrow" id="mrow${gi}">${mobileHTML(g,gi,0)}</div>`);
   });
-  box.insertAdjacentHTML('beforeend', `<div class="mcmp" id="mcmp"></div>`);
   box.insertAdjacentHTML('beforeend',
     `<div class="mnote">資料更新：${DATA.updated}（台北）· 紅漲綠跌<br>ETF＝市價不含息報酬；基金/全委＝官方含息含撥回。僅供參考，非投資建議。</div>`);
 }
 
-
-/* ---- 台股基金比較：多多 vs 經貿 vs 台優龍（元大投信官方逐日淨值自算） ---- */
-const CMP = DATA.compare || null;
-let cmpRange = 'y1';
-const CMP_RANGES = [['ytd','YTD'],['y1','近1年'],['y3','近3年'],['y5','近5年'],['common','2020/3 以來']];
-const CMP_RLBL = Object.fromEntries(CMP_RANGES);
-function cmpFrom(key, lastIso){
-  const last=new Date(lastIso);
-  if(key==='ytd') return new Date(last.getFullYear(),0,1);
-  if(key==='y1'){const d=new Date(last); d.setFullYear(d.getFullYear()-1); return d;}
-  if(key==='y3'){const d=new Date(last); d.setFullYear(d.getFullYear()-3); return d;}
-  if(key==='y5'){const d=new Date(last); d.setFullYear(d.getFullYear()-5); return d;}
-  const c=new Date(CMP.commonStart); c.setDate(c.getDate()-1); return c;   // 共同起點前一交易日（台優龍成立日淨值 10）
-}
-/* 多線圖：各檔在區間起點前一筆（<起點最近一筆）重設為 100 */
-function cmpChart(key, H, W){
-  H = H||230; W = W||560;
-  const padL=8,padR=8,padT=16,padB=20;
-  const last = CMP.funds.map(f=>f.navDate).sort().slice(-1)[0];
-  const from = cmpFrom(key, last);
-  const lines = CMP.funds.map(f=>{
-    const s=f.series; let i0=0;
-    // 基準＝區間起點當日或之前最近一筆（與表格期間報酬同口徑）
-    for(let i=0;i<s.length;i++){ if(new Date(s[i][0])<=from) i0=i; else break; }
-    if(new Date(s[0][0])>from) i0=0;
-    const base=s[i0][1];
-    const pts=s.slice(i0).map(p=>[p[0], +(p[1]/base*100).toFixed(2)]);
-    return {f, pts, end: pts[pts.length-1][1]};
-  });
-  // 共同 x 軸：取所有日期聯集（三檔交易日幾乎一致）
-  const dateSet=new Set(); lines.forEach(l=>l.pts.forEach(p=>dateSet.add(p[0])));
-  const dates=[...dateSet].sort(); const n=dates.length;
-  if(n<2) return '<div class="cnote">資料不足</div>';
-  const di=Object.fromEntries(dates.map((d,i)=>[d,i]));
-  let mn=Infinity,mx=-Infinity;
-  lines.forEach(l=>l.pts.forEach(p=>{mn=Math.min(mn,p[1]);mx=Math.max(mx,p[1]);}));
-  const pad=(mx-mn)*0.08; mn-=pad; mx+=pad;
-  const X=i=>padL+(W-padL-padR)*i/(n-1);
-  const Y=v=>padT+(H-padT-padB)*(1-(v-mn)/(mx-mn));
-  let paths='';
-  lines.forEach(l=>{
-    let d='';
-    l.pts.forEach((p,j)=>{d+=(j?'L':'M')+X(di[p[0]]).toFixed(1)+' '+Y(p[1]).toFixed(1)+' ';});
-    paths+=`<path d="${d}" fill="none" stroke="${l.f.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    paths+=`<circle class="hcz" data-k="${l.f.code}" r="3.4" fill="${l.f.color}" opacity="0"/>`;
-  });
-  let base='';
-  if(100>=mn && 100<=mx){
-    const yb=Y(100).toFixed(1);
-    base=`<line x1="${padL}" y1="${yb}" x2="${W-padR}" y2="${yb}" stroke="#c7d2e3" stroke-width="1" stroke-dasharray="3 3"/><text x="${W-padR}" y="${(+yb-3)}" text-anchor="end" class="axislbl">100</text>`;
-  }
-  // 網格：y 軸 3 條
-  let grid='';
-  for(let k=1;k<=3;k++){ const v=mn+(mx-mn)*k/4; const y=Y(v).toFixed(1);
-    grid+=`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#eef2f8" stroke-width="1"/><text x="${padL}" y="${(+y-2)}" class="axislbl">${v.toFixed(0)}</text>`; }
-  // hover 資料：每個日期 → 各檔值
-  const byDate=dates.map((d,i)=>{ const row={x:+X(i).toFixed(1), d, v:{}};
-    lines.forEach(l=>{ const p=l.pts.find(q=>q[0]===d); if(p){ row.v[l.f.code]=[+Y(p[1]).toFixed(1), p[1]]; } });
-    return row; });
-  const legend = lines.map(l=>`<span class="lg"><i style="background:${l.f.color}"></i>${l.f.short}<small class="${l.end>=100?'pos':'neg'}">${l.end>=100?'+':''}${(l.end-100).toFixed(1)}%</small></span>`).join('');
-  const lbl0=dates[0].slice(2), lbl1=dates[n-1].slice(2);
-  return `<div class="cmplegend">${legend}</div>
-  <div class="chartbox"><svg viewBox="0 0 ${W} ${H}" data-cmp='${JSON.stringify(byDate)}' data-w="${W}" data-h="${H}" onmousemove="hoverCmp(event)" onmouseleave="hideCmp(event)" ontouchstart="hoverCmp(event.touches[0], event.currentTarget)" ontouchmove="hoverCmp(event.touches[0], event.currentTarget)">
-    ${grid}${base}${paths}
-    <line class="vln" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="#9aa8bd" stroke-width="1" stroke-dasharray="2 2" opacity="0"/>
-    <text x="${padL}" y="${H-5}" class="axislbl">${lbl0}</text>
-    <text x="${W-padR}" y="${H-5}" text-anchor="end" class="axislbl">${lbl1}</text>
-  </svg><div class="tip"></div></div>`;
-}
-function hoverCmp(e, svgEl){
-  const svg=svgEl||e.currentTarget; const rows=JSON.parse(svg.getAttribute('data-cmp'));
-  const W=+svg.getAttribute('data-w'), H=+svg.getAttribute('data-h');
-  const box=svg.getBoundingClientRect();
-  const rx=(e.clientX-box.left)/box.width*W;
-  let best=rows[0],bd=1e9;
-  for(const r of rows){const dd=Math.abs(r.x-rx);if(dd<bd){bd=dd;best=r;}}
-  const vl=svg.querySelector('.vln'); vl.setAttribute('x1',best.x); vl.setAttribute('x2',best.x); vl.setAttribute('opacity','1');
-  let html=best.d, topY=H;
-  CMP.funds.forEach(f=>{
-    const dot=svg.querySelector('.hcz[data-k="'+f.code+'"]'); const v=best.v[f.code];
-    if(v){ dot.setAttribute('cx',best.x); dot.setAttribute('cy',v[0]); dot.setAttribute('opacity','1'); topY=Math.min(topY,v[0]);
-      html+=`<br><span style="color:${f.color==='#003580'?'#8fb3ff':f.color}">●</span> ${f.short} <b>${v[1].toFixed(1)}</b>（${v[1]>=100?'+':''}${(v[1]-100).toFixed(1)}%）`; }
-    else dot.setAttribute('opacity','0');
-  });
-  const tip=svg.parentNode.querySelector('.tip');
-  tip.innerHTML=html; tip.style.left=(best.x/W*box.width)+'px'; tip.style.top=(topY/H*box.height)+'px'; tip.style.opacity='1';
-}
-function hideCmp(e){ const svg=e.currentTarget; svg.querySelectorAll('.hcz').forEach(d=>d.setAttribute('opacity','0')); svg.querySelector('.vln').setAttribute('opacity','0'); svg.parentNode.querySelector('.tip').style.opacity='0'; }
-function setCmpRange(k){ cmpRange=k; renderCmp(); }
-function cmpRangeBtns(){
-  return `<div class="cmpctl"><span class="lbl">報酬指數（起點＝100）</span>`+
-    CMP_RANGES.map(([k,l])=>`<button class="rbtn${cmpRange===k?' on':''}" onclick="setCmpRange('${k}')">${l}</button>`).join('')+`</div>`;
-}
-const fmtNum = (v,d)=> (v===null||v===undefined)?'<span class="na">—</span>':v.toLocaleString('zh-TW',{minimumFractionDigits:d===undefined?2:d,maximumFractionDigits:d===undefined?2:d});
-const fmtYi = v => (v===null||v===undefined)?'<span class="na">—</span>':(v/1e8).toLocaleString('zh-TW',{maximumFractionDigits:1})+' 億';
-/* 一列：label、各檔值（getter）、是否標最佳（高者佳 'hi' / 低者佳 'lo' / 不標） */
-function cmpRow(label, get, best, fmt){
-  const vals=CMP.funds.map(get);
-  let bi=-1;
-  if(best){ const nums=vals.map((v,i)=>typeof v==='number'?[v,i]:null).filter(Boolean);
-    if(nums.length>1){ nums.sort((a,b)=>best==='hi'?b[0]-a[0]:a[0]-b[0]); bi=nums[0][1]; } }
-  return `<tr><td>${label}</td>`+vals.map((v,i)=>`<td class="${i===bi?'best':''}">${fmt?fmt(v,i):fmtPct(v)}</td>`).join('')+`</tr>`;
-}
-function cmpSec(t){ return `<tr class="sec"><td colspan="${CMP.funds.length+1}">${t}</td></tr>`; }
-function cmpTable(){
-  const head=`<thead><tr><th>項目</th>`+CMP.funds.map(f=>`<th class="fh"><i style="background:${f.color}"></i>${f.short}<small>${f.name}<br>${f.cls}</small></th>`).join('')+`</tr></thead>`;
-  const lp=CMP.funds[0].lipper||{}; const lpAs = lp.asOf? (lp.asOf.slice(0,4)+'/'+lp.asOf.slice(4)) : '';
-  const body=`<tbody>
-    ${cmpSec('最新淨值')}
-    ${cmpRow('淨值／市價（新台幣）', f=>f.nav, null, (v,i)=>`<span class="big">${fmtNum(v)}</span> <small>${CMP.funds[i].navLabel||''}</small><br><small>${CMP.funds[i].navDate||''}</small>`)}
-    ${cmpRow('當日漲跌', f=>f.changePct, null, (v,i)=>{const f=CMP.funds[i]; return (f.change!==null&&f.change!==undefined?`<small>${f.change>=0?'+':''}${f.change}</small> `:'')+fmtPct(v);})}
-    ${cmpSec('累積報酬率（非年化、含息總報酬；基金＝不配息淨值、0050／台積電＝除息分割還原市價）')}
-    ${cmpRow('今年以來', f=>f.returns.ytd, 'hi')}
-    ${cmpRow('近 1 月', f=>f.returns.m1, 'hi')}
-    ${cmpRow('近 3 月', f=>f.returns.m3, 'hi')}
-    ${cmpRow('近 6 月', f=>f.returns.m6, 'hi')}
-    ${cmpRow('近 1 年', f=>f.returns.y1, 'hi')}
-    ${cmpRow('近 3 年', f=>f.returns.y3, 'hi')}
-    ${cmpRow('近 5 年', f=>f.returns.y5, 'hi')}
-    ${cmpRow('2020/3/23 以來<br><small>（台優龍成立日，共同起點）</small>', f=>f.returns.common, 'hi')}
-    ${cmpSec('市價報酬（不含息，僅 0050／台積電；基金淨值已含息故不另列）')}
-    ${cmpRow('今年以來（市價）', f=>(f.priceReturns||{}).ytd, null)}
-    ${cmpRow('近 1 年（市價）', f=>(f.priceReturns||{}).y1, null)}
-    ${cmpSec('風險（近 1 年／近 3 年）')}
-    ${cmpRow('年化波動度（近1年）', f=>f.vol1y, 'lo', v=>v===null||v===undefined?'<span class="na">—</span>':v.toFixed(2)+'%')}
-    ${cmpRow('最大回撤（近1年）', f=>f.mdd1y, 'hi')}
-    ${cmpRow('最大回撤（近3年）', f=>f.mdd3y, 'hi')}
-    ${cmpRow('近1年最高淨值', f=>f.hi1y, null, (v,i)=>fmtNum(v)+`<br><small>${CMP.funds[i].hi1yDate||''}</small>`)}
-    ${cmpRow('近1年最低淨值', f=>f.lo1y, null, (v,i)=>fmtNum(v)+`<br><small>${CMP.funds[i].lo1yDate||''}</small>`)}
-    ${cmpRow('距近1年高點', f=>(f.nav&&f.hi1y)?+((f.nav/f.hi1y-1)*100).toFixed(2):null, 'hi')}
-    ${cmpSec('基本資料（元大投信官網）')}
-    ${cmpRow('基金規模', f=>f.sizeNtd, null, (v,i)=>fmtYi(v)+(CMP.funds[i].sizeDate?`<br><small>${CMP.funds[i].sizeDate}</small>`:''))}
-    ${cmpRow('成立日', f=>f.inception, null, v=>v||'—')}
-    ${cmpRow('風險等級', f=>f.risk, null, v=>v||'—')}
-    ${cmpRow('配息', f=>f.payout, null, v=>v||'—')}
-    ${cmpRow('最低申購／定期定額', f=>f.minBuy, null, (v,i)=>CMP.funds[i].kind==='stock'?'<span class="na">—</span>':(v?fmtNum(v,0):'—')+' / '+(CMP.funds[i].minRsp?fmtNum(CMP.funds[i].minRsp,0):'—'))}
-    ${cmpSec('元大官網揭露報酬（理柏 Lipper，截至 '+lpAs+' 月底，累積、淨值含息；台積電非基金故無）')}
-    ${cmpRow('今年以來', f=>(f.lipper||{}).ytd, 'hi')}
-    ${cmpRow('近 1 年', f=>(f.lipper||{}).y1, 'hi')}
-    ${cmpRow('近 3 年', f=>(f.lipper||{}).y3, 'hi')}
-    ${cmpRow('近 5 年', f=>(f.lipper||{}).y5, 'hi')}
-    ${cmpRow('成立以來', f=>(f.lipper||{}).incept, null)}
-  </tbody>`;
-  return `<div style="overflow-x:auto"><table class="cmpt">${head}${body}</table></div>`;
-}
-function renderCmp(){
-  const box=document.getElementById('cmpcard'); if(!box) return;
-  if(!CMP||!CMP.funds||!CMP.funds.length){ box.style.display='none'; return; }
-  box.innerHTML=`<div class="hd">⚖️ 台股比較：多多 · 經貿 · 台優龍 vs 0050 · 台積電 <span class="hdsub">基金＝A類型不配息淨值；0050／台積電＝市價除息分割還原（皆含息總報酬）</span></div>
-    <div class="cmpwrap">
-      <div class="cmpchart">${cmpRangeBtns()}${cmpChart(cmpRange, 300, window.innerWidth>860?1100:560)}
-        <div class="cnote">各檔於區間起點重設為 100，曲線＝累積報酬指數（皆含息）；滑鼠移過可看各檔同日數值。★＝該列表現最佳（報酬取高、波動取低、回撤取淺）。</div>
-      </div>
-      <div style="min-width:0">${cmpTable()}</div>
-    </div>
-    <div class="tblnote">※ 資料源：${CMP.source}。期間報酬＝最新淨值÷期初淨值−1（期初取該日或之前最近一筆；今年以來取去年最後一筆）；年化波動＝近1年日對數報酬標準差×√252；最大回撤＝區間內淨值相對前高的最大跌幅。三檔基金皆為不配息級別，淨值報酬即含息總報酬；0050／台積電以 FinMind 市價，除息日加回現金股利、分割日乘回分割比例（0050 2025/6/18 一拆四）還原成總報酬序列，尾端對齊最新市價。上方總覽表「近3年」為鉅亨／晨星之年化值，與此表累積值口徑不同。</div>`;
-  const m=document.getElementById('mcmp'); if(m) m.innerHTML=mobileCmpHTML();
-}
-function mobileCmpHTML(){
-  if(!CMP||!CMP.funds||!CMP.funds.length) return '';
-  const head=`<thead><tr><th></th>`+CMP.funds.map(f=>`<th class="fh"><i style="background:${f.color}"></i>${f.short}</th>`).join('')+`</tr></thead>`;
-  const rows=[
-    cmpRow('淨值/市價', f=>f.nav, null, v=>`<span class="big">${fmtNum(v)}</span>`),
-    cmpRow('當日', f=>f.changePct, null),
-    cmpRow('今年以來', f=>f.returns.ytd, 'hi'),
-    cmpRow('近1年', f=>f.returns.y1, 'hi'),
-    cmpRow('近3年', f=>f.returns.y3, 'hi'),
-    cmpRow('近1年最大回撤', f=>f.mdd1y, 'hi'),
-    cmpRow('規模', f=>f.sizeNtd, null, v=>fmtYi(v)),
-  ].join('');
-  return `<div class="mname">⚖️ 多多 · 經貿 · 台優龍 vs 0050 · 台積電</div>
-    <div class="msub">皆為含息總報酬（基金＝不配息淨值；0050／2330＝市價還原） · ${CMP.funds[0].navDate||''}</div>
-    ${cmpRangeBtns()}${cmpChart(cmpRange, 170)}
-    <div style="overflow-x:auto"><table>${head}<tbody>${rows}</tbody></table></div>`;
-}
 
 /* ---- 一鍵複製：版本 B（分類 + 完整名稱 + 淨值日 + 幣別，emoji 易讀） ---- */
 const KGROUP={etf:'〔ETF〕', disc:'〔全委帳戶〕', fund:'〔共同基金〕'};
@@ -1665,7 +1263,7 @@ function copySelectedImage(btn){
   crCopy(renderImagesCanvas(selectedImageItems(),'（自選）'), btn);
 }
 
-overview();cards();mobile();renderCmp();
+overview();cards();mobile();
 (function(){
   let saved=null; try{ saved=localStorage.getItem('yf_view'); }catch(e){}
   const mob = saved ? (saved==='m') : window.matchMedia('(max-width:560px)').matches;
